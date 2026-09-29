@@ -22,7 +22,7 @@ export async function GET(
       );
     }
 
-    const status = getJobStatus(jobId);
+    const status = await getJobStatus(jobId);
 
     if (!status) {
       return NextResponse.json(
