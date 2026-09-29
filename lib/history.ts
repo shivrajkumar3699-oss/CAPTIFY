@@ -110,10 +110,16 @@ export async function updateProjectStatus({
   jobId,
   status,
   clips,
+  progress,
+  message,
+  error,
 }: {
   jobId: string;
   status: string;
   clips?: StatusClip[];
+  progress?: number;
+  message?: string;
+  error?: string;
 }) {
   await ensureHistorySchema();
 
@@ -121,6 +127,9 @@ export async function updateProjectStatus({
     UPDATE captify_projects
     SET
       status = ${status},
+      progress = COALESCE(${progress ?? null}, progress),
+      message = COALESCE(${message ?? null}, message),
+      error = ${error ?? null},
       completed_at = CASE
         WHEN ${status} = 'done' THEN NOW()
         ELSE completed_at
