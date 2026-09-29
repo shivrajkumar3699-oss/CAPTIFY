@@ -348,6 +348,7 @@ export default function Home() {
   const [framing, setFraming] = useState<"fill" | "fit">("fill");
 
   const [uploadProgress, setUploadProgress] = useState(0);
+  const uploadProgressRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -365,22 +366,16 @@ export default function Home() {
   const isDone = status?.status === "done";
 
   const progress = useMemo(() => {
-    if (isProcessing) {
-      return Math.min(
-        99,
-        Math.max(uploadProgress, status?.progress || 0)
-      );
-    }
-
+    // Upload progress and processing progress are separate phases.
+    // Never mix the upload percentage into the worker percentage.
     if (isDone) return 100;
 
-    return uploadProgress;
-  }, [
-    isProcessing,
-    isDone,
-    status?.progress,
-    uploadProgress,
-  ]);
+    if (isProcessing) {
+      return Math.max(0, Math.min(99, status?.progress ?? 0));
+    }
+
+    return Math.max(0, Math.min(100, uploadProgress));
+  }, [isProcessing, isDone, status?.progress, uploadProgress]);
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -556,14 +551,25 @@ export default function Home() {
 
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
-            setUploadProgress(
-              Math.round((event.loaded / event.total) * 100)
+            const nextProgress = Math.round(
+              (event.loaded / event.total) * 100
             );
+
+            // Browser/network progress events can occasionally arrive
+            // out of order. Keep the visual progress monotonic.
+            const safeProgress = Math.max(
+              uploadProgressRef.current,
+              Math.min(99, nextProgress)
+            );
+
+            uploadProgressRef.current = safeProgress;
+            setUploadProgress(safeProgress);
           }
         };
 
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
+            uploadProgressRef.current = 100;
             setUploadProgress(100);
             resolve();
             return;
@@ -586,6 +592,11 @@ export default function Home() {
 
         xhr.send(file);
       });
+
+      // Upload is finished. From this point onward the worker owns the
+      // progress value, so the upload percentage must not leak into it.
+      uploadProgressRef.current = 0;
+      setUploadProgress(0);
 
       const processResponse =
         await fetch("/api/process", {
@@ -629,9 +640,9 @@ export default function Home() {
       setStatus({
         jobId: newJobId,
         status: "queued",
-        progress: 0,
+        progress: 1,
         message:
-          "Job queued, waiting for CAPTIFYY AI...",
+          "Job queued, waiting for worker to pick it up",
       });
 
       startPolling(newJobId);
@@ -690,6 +701,7 @@ export default function Home() {
     setFile(null);
     setJobId("");
     setStatus(null);
+    uploadProgressRef.current = 0;
     setUploadProgress(0);
     setError("");
     setCopied(null);
@@ -708,6 +720,7 @@ export default function Home() {
     setFile(null);
     setStatus(null);
     setJobId("");
+    uploadProgressRef.current = 0;
     setUploadProgress(0);
     setError("");
 
