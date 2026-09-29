@@ -13,14 +13,14 @@ const QUICK_AMOUNTS = [21, 51, 99, 199, 499, 999];
 
 const FAQS = [
   {
-    question: "What files does CAPTIFY support?",
+    question: "What files does CAPTIFYY support?",
     answer:
-      "CAPTIFY currently supports MP3, WAV, MP4 and MKV files. The maximum upload size is 3 GB.",
+      "CAPTIFYY currently supports MP3, WAV, MP4 and MKV files. The maximum upload size is 3 GB.",
   },
   {
-    question: "Is CAPTIFY a translation website?",
+    question: "Is CAPTIFYY a translation website?",
     answer:
-      "No. CAPTIFY is a caption and clip-generation studio. You choose the caption language you want and CAPTIFY renders the selected captions into your output.",
+      "No. CAPTIFYY is a caption and clip-generation studio. You choose the caption language you want and CAPTIFYY renders the selected captions into your output.",
   },
   {
     question: "How many clips can I generate?",
@@ -35,7 +35,7 @@ const FAQS = [
   {
     question: "My processing seems stuck. What should I do?",
     answer:
-      "Give the job some time first, especially for long or high-resolution videos. If it remains stuck, note the last status shown by CAPTIFY, refresh the Studio and try the job again.",
+      "Give the job some time first, especially for long or high-resolution videos. If it remains stuck, note the last status shown by CAPTIFYY, refresh the Studio and try the job again.",
   },
   {
     question: "Why did my video fail during processing?",
@@ -45,7 +45,7 @@ const FAQS = [
   {
     question: "Can I change the caption language?",
     answer:
-      "Yes. Studio lets you choose the video language and the caption language. CAPTIFY can work with Hindi, English and Hinglish options.",
+      "Yes. Studio lets you choose the video language and the caption language. CAPTIFYY can work with Hindi, English and Hinglish options.",
   },
   {
     question: "Can I change caption styling?",
@@ -181,7 +181,7 @@ export default function SupportPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    document.title = "Support — CAPTIFY";
+    document.title = "Support — CAPTIFYY";
   }, []);
 
   const customNumericAmount = customAmount
@@ -204,7 +204,7 @@ export default function SupportPage() {
   const qrData = useMemo(() => {
     return (
       `upi://pay?pa=${encodeURIComponent(UPI_ID)}` +
-      `&pn=${encodeURIComponent("CAPTIFY")}` +
+      `&pn=${encodeURIComponent("CAPTIFYY")}` +
       `&am=${amount}` +
       `&cu=INR`
     );
@@ -217,10 +217,10 @@ export default function SupportPage() {
   }, [qrData]);
 
   const gmailUrl = useMemo(() => {
-    const subject = encodeURIComponent("CAPTIFY — Report a Problem");
+    const subject = encodeURIComponent("CAPTIFYY — Report a Problem");
 
     const body = encodeURIComponent(
-      `Hi Shivraj,\n\nI found a problem while using CAPTIFY.\n\nProblem:\n\n\nFile type / size:\n\n\nWhat happened:\n\n\nAnything else:\n\n\nThanks.`
+      `Hi Shivraj,\n\nI found a problem while using CAPTIFYY.\n\nProblem:\n\n\nFile type / size:\n\n\nWhat happened:\n\n\nAnything else:\n\n\nThanks.`
     );
 
     return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
@@ -311,7 +311,7 @@ export default function SupportPage() {
 
             <div>
               <div className="text-sm font-black uppercase tracking-[0.24em]">
-                CAPTIFY
+                CAPTIFYY
               </div>
 
               <div className="hidden text-[8px] font-semibold uppercase tracking-[0.28em] text-white/30 sm:block">
@@ -366,13 +366,13 @@ export default function SupportPage() {
                     color: "transparent",
                   }}
                 >
-                  CAPTIFY
+                  CAPTIFYY
                 </span>{" "}
                 moving.
               </h1>
 
               <p className="mt-5 max-w-2xl text-sm leading-7 text-white/35 sm:text-base">
-                If you enjoy using CAPTIFY and want to support the project,
+                If you enjoy using CAPTIFYY and want to support the project,
                 you can leave an optional tip. Every amount is completely
                 optional.
               </p>
@@ -550,14 +550,14 @@ export default function SupportPage() {
                   </div>
 
                   <p className="text-[10px] leading-5 text-white/25">
-                    Payments are handled through your UPI app. CAPTIFY does
+                    Payments are handled through your UPI app. CAPTIFYY does
                     not ask for your UPI PIN, card details or banking
                     credentials.
                   </p>
                 </div>
 
                 <p className="mt-5 text-center text-[9px] leading-5 text-white/20">
-                  Support is completely optional. CAPTIFY does not unlock
+                  Support is completely optional. CAPTIFYY does not unlock
                   features or provide special access in exchange for a tip.
                 </p>
               </div>
@@ -568,7 +568,7 @@ export default function SupportPage() {
         <section className="mt-16 max-w-4xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
             <Icon name="help" size={13} />
-            CAPTIFY Support
+            CAPTIFYY Support
           </div>
 
           <h2 className="mt-7 text-5xl font-black tracking-[-0.055em] sm:text-7xl">
@@ -588,7 +588,7 @@ export default function SupportPage() {
 
           <p className="mt-6 max-w-2xl text-base leading-7 text-white/40 sm:text-lg">
             Find answers to the questions that usually come up while
-            uploading, processing and creating clips with CAPTIFY.
+            uploading, processing and creating clips with CAPTIFYY.
           </p>
         </section>
 
@@ -602,7 +602,7 @@ export default function SupportPage() {
 
             <p className="mt-2 text-sm leading-6 text-white/35">
               Check your file type, file size and internet connection first.
-              CAPTIFY supports MP3, WAV, MP4 and MKV up to 3 GB.
+              CAPTIFYY supports MP3, WAV, MP4 and MKV up to 3 GB.
             </p>
           </div>
 
@@ -644,7 +644,7 @@ export default function SupportPage() {
             </h2>
 
             <p className="mt-3 max-w-2xl text-sm leading-6 text-white/30">
-              The things a normal CAPTIFY user is most likely to wonder about.
+              The things a normal CAPTIFYY user is most likely to wonder about.
             </p>
           </div>
 
@@ -731,11 +731,11 @@ export default function SupportPage() {
           </div>
 
           <h2 className="mt-6 text-3xl font-black tracking-tight sm:text-4xl">
-            Thanks for using CAPTIFY.
+            Thanks for using CAPTIFYY.
           </h2>
 
           <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-white/30">
-            Whether you use CAPTIFY once or keep coming back, the project is
+            Whether you use CAPTIFYY once or keep coming back, the project is
             built to make your editing workflow simpler.
           </p>
 
@@ -750,7 +750,7 @@ export default function SupportPage() {
 
         <footer className="mt-24 border-t border-white/[0.07] pt-7 text-xs text-white/25">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span>CAPTIFY · Your videos. Captions, perfected.</span>
+            <span>CAPTIFYY · Your videos. Captions, perfected.</span>
 
             <span>MADE BY SHIVRAJ KUMAR</span>
           </div>
