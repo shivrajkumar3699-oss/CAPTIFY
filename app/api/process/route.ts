@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sourcePathname = new URL(sourceUrl).pathname.replace(/^\/+/, "");
+    const sourcePathname = new URL(sourceUrl).pathname.replace(/^\\/+/, "");
 
     const signedToken = await issueSignedToken({
       pathname: sourcePathname,
