@@ -17,34 +17,83 @@ const { chooseBgmForSegment } = require("./lib/bgmMap");
 const { convertWords } = require("./lib/convertWords");
 
 const app = express();
-app.use(express.json());
 
-const PORT = process.env.PORT || 8080;
+app.use(express.json({ limit: "1mb" }));
+
+const PORT = Number(process.env.PORT) || 8080;
 const WORKER_SECRET = process.env.WORKER_SECRET;
 const STORAGE_DIR = process.env.STORAGE_DIR;
-const NEXT_APP_URL = process.env.NEXT_APP_URL || "http://localhost:3000";
+const NEXT_APP_URL =
+  process.env.NEXT_APP_URL || "http://localhost:3000";
+
 const BGM_DIR = path.join(__dirname, "assets", "bgm");
+
+const ALLOWED_EXTENSIONS = new Set([
+  "mp3",
+  "wav",
+  "mp4",
+  "mkv",
+]);
+
+// ------------------------------------------------------------
+// Startup validation
+// ------------------------------------------------------------
+
+if (!WORKER_SECRET) {
+  console.warn(
+    "WARNING: WORKER_SECRET is not configured."
+  );
+}
+
+if (!STORAGE_DIR) {
+  console.warn(
+    "WARNING: STORAGE_DIR is not configured."
+  );
+}
+
+// ------------------------------------------------------------
+// Authentication
+// ------------------------------------------------------------
 
 function checkSecret(req, res, next) {
   const secret = req.headers["x-worker-secret"];
 
-  if (secret !== WORKER_SECRET) {
-    return res.status(401).json({ error: "unauthorized" });
+  if (!WORKER_SECRET || secret !== WORKER_SECRET) {
+    return res.status(401).json({
+      error: "unauthorized",
+    });
   }
 
   next();
 }
 
+// ------------------------------------------------------------
+// Push status back to Next.js
+// ------------------------------------------------------------
+
 async function pushStatus(jobId, statusUpdate) {
   try {
-    await fetch(`${NEXT_APP_URL}/api/internal/status`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-worker-secret": WORKER_SECRET,
-      },
-      body: JSON.stringify({ jobId, ...statusUpdate }),
-    });
+    if (!NEXT_APP_URL) {
+      console.error(
+        `[${jobId}] NEXT_APP_URL is not configured`
+      );
+      return;
+    }
+
+    await fetch(
+      `${NEXT_APP_URL.replace(/\/+$/, "")}/api/internal/status`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-secret": WORKER_SECRET || "",
+        },
+        body: JSON.stringify({
+          jobId,
+          ...statusUpdate,
+        }),
+      }
+    );
   } catch (err) {
     console.error(
       `[${jobId}] Failed to push status update:`,
@@ -53,14 +102,19 @@ async function pushStatus(jobId, statusUpdate) {
   }
 }
 
-// SNAP_START
-// Moves a clip's start/end so it begins and ends cleanly on word boundaries:
-// no half-cut words, and no dead air at the start or end of the clip.
+// ------------------------------------------------------------
+// SNAP
+// ------------------------------------------------------------
+
 function snapSegmentToWords(seg, words, videoDuration) {
   let start = Number(seg.startTime);
   let end = Number(seg.endTime);
 
-  if (!isFinite(start) || !isFinite(end) || end <= start) {
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    end <= start
+  ) {
     return seg;
   }
 
@@ -68,28 +122,45 @@ function snapSegmentToWords(seg, words, videoDuration) {
   const TAIL = 0.35;
   const MIN_LENGTH = 5;
 
-  // START: first word that has not already finished before the requested start
-  const firstWord = words.find((w) => w.end > start);
+  // Find first word that overlaps the requested start.
+  const firstWord = words.find(
+    (w) => Number(w.end) > start
+  );
 
-  if (firstWord && firstWord.start < end - MIN_LENGTH) {
-    start = Math.max(0, firstWord.start - PRE_ROLL);
+  if (
+    firstWord &&
+    Number(firstWord.start) < end - MIN_LENGTH
+  ) {
+    start = Math.max(
+      0,
+      Number(firstWord.start) - PRE_ROLL
+    );
   }
 
-  // END: last word that begins before the requested end
+  // Find the last word that starts before requested end.
   let lastWord = null;
 
   for (let i = words.length - 1; i >= 0; i--) {
-    if (words[i].start < end) {
+    if (Number(words[i].start) < end) {
       lastWord = words[i];
       break;
     }
   }
 
-  if (lastWord && lastWord.end + TAIL > start + MIN_LENGTH) {
-    end = lastWord.end + TAIL;
+  if (
+    lastWord &&
+    Number(lastWord.end) + TAIL >
+      start + MIN_LENGTH
+  ) {
+    end =
+      Number(lastWord.end) +
+      TAIL;
   }
 
-  end = Math.min(end, videoDuration);
+  end = Math.min(
+    end,
+    videoDuration
+  );
 
   if (end - start < 1) {
     return seg;
@@ -101,10 +172,17 @@ function snapSegmentToWords(seg, words, videoDuration) {
     endTime: end,
   };
 }
-// SNAP_END
+
+// ------------------------------------------------------------
+// PROCESS ENDPOINT
+// ------------------------------------------------------------
 
 app.post("/process", checkSecret, (req, res) => {
-  const { jobId, ext, options } = req.body || {};
+  const {
+    jobId,
+    ext,
+    options,
+  } = req.body || {};
 
   if (!jobId || !ext) {
     return res.status(400).json({
@@ -112,20 +190,72 @@ app.post("/process", checkSecret, (req, res) => {
     });
   }
 
-  // Respond immediately, do the real work in the background.
-  res.json({ received: true });
+  const cleanJobId = String(jobId).trim();
+  const cleanExt = String(ext)
+    .trim()
+    .toLowerCase();
 
-  runPipeline(jobId, ext, options || {}).catch((err) => {
-    console.error(`[${jobId}] Pipeline crashed:`, err);
+  if (
+    !/^[a-zA-Z0-9_-]+$/.test(cleanJobId)
+  ) {
+    return res.status(400).json({
+      error: "Invalid jobId",
+    });
+  }
 
-    pushStatus(jobId, {
+  if (!ALLOWED_EXTENSIONS.has(cleanExt)) {
+    return res.status(400).json({
+      error:
+        "Unsupported file type. Use MP3, WAV, MP4, or MKV.",
+    });
+  }
+
+  // Respond immediately.
+  res.status(202).json({
+    received: true,
+    jobId: cleanJobId,
+    status: "queued",
+  });
+
+  // Process in background.
+  runPipeline(
+    cleanJobId,
+    cleanExt,
+    options || {}
+  ).catch(async (err) => {
+    console.error(
+      `[${cleanJobId}] Pipeline crashed:`,
+      err
+    );
+
+    const message =
+      err?.message ||
+      "Unknown processing error";
+
+    await pushStatus(cleanJobId, {
       status: "error",
-      error: err.message || "Unknown error",
+      progress: 0,
+      message: "Processing failed",
+      error: message,
     });
   });
 });
 
-async function runPipeline(jobId, ext, options) {
+// ------------------------------------------------------------
+// MAIN PIPELINE
+// ------------------------------------------------------------
+
+async function runPipeline(
+  jobId,
+  ext,
+  options
+) {
+  if (!STORAGE_DIR) {
+    throw new Error(
+      "STORAGE_DIR is not configured"
+    );
+  }
+
   const sourcePath = path.join(
     STORAGE_DIR,
     "uploads",
@@ -145,22 +275,38 @@ async function runPipeline(jobId, ext, options) {
     jobId
   );
 
-  fs.mkdirSync(resultsDir, { recursive: true });
-  fs.mkdirSync(tmpDir, { recursive: true });
+  fs.mkdirSync(
+    resultsDir,
+    { recursive: true }
+  );
 
-  const clipCount =
-    options.clipCount ||
-    options.numClips ||
-    6;
+  fs.mkdirSync(
+    tmpDir,
+    { recursive: true }
+  );
 
-  const useBgm = !!(
+  const clipCount = Math.max(
+    1,
+    Math.min(
+      20,
+      Number(
+        options.clipCount ||
+        options.numClips ||
+        6
+      ) || 6
+    )
+  );
+
+  const useBgm = Boolean(
     options.useBgm ||
     options.bgm
   );
 
   const captionColor =
-    options.captionColor ||
-    "#FFD700";
+    typeof options.captionColor === "string" &&
+    options.captionColor.trim()
+      ? options.captionColor.trim()
+      : "#FFD700";
 
   const framing =
     options.framing === "fill"
@@ -175,20 +321,42 @@ async function runPipeline(jobId, ext, options) {
     options.captionLanguage ||
     "same";
 
-  // Tracks which BGM files have already been used in THIS job,
-  // so the same song doesn't repeat unnecessarily across clips.
   const usedBgmFiles = new Set();
 
   try {
+    // ----------------------------------------------------------
+    // Validate source
+    // ----------------------------------------------------------
+
     if (!fs.existsSync(sourcePath)) {
       throw new Error(
         `Source file not found at ${sourcePath}`
       );
     }
 
-    // ------------------------------------------------------------
+    const sourceStats =
+      fs.statSync(sourcePath);
+
+    if (
+      !sourceStats.isFile() ||
+      sourceStats.size <= 0
+    ) {
+      throw new Error(
+        "Uploaded source file is empty or invalid"
+      );
+    }
+
+    console.log(
+      `[${jobId}] Source: ${sourcePath}`
+    );
+
+    console.log(
+      `[${jobId}] Size: ${sourceStats.size} bytes`
+    );
+
+    // ----------------------------------------------------------
     // Step 1: Extract audio
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
 
     await pushStatus(jobId, {
       status: "transcribing",
@@ -206,9 +374,9 @@ async function runPipeline(jobId, ext, options) {
       audioPath
     );
 
-    // ------------------------------------------------------------
-    // Step 2: Transcribe with word-level timestamps
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
+    // Step 2: Transcribe
+    // ----------------------------------------------------------
 
     await pushStatus(jobId, {
       status: "transcribing",
@@ -216,106 +384,118 @@ async function runPipeline(jobId, ext, options) {
       message: "Transcribing audio",
     });
 
-    // IMPORTANT:
-    // We need BOTH:
-    //   text  -> Gemini hook detection
-    //   words -> precise caption timing + clip snapping
     const transcription =
       await transcribeWithTimestamps(
         audioPath,
         audioLanguage
       );
 
-    const text = transcription?.text;
-    const words = transcription?.words;
+    const text =
+      transcription?.text;
+
+    const words =
+      transcription?.words;
 
     if (
-      !words ||
       !Array.isArray(words) ||
       words.length === 0
     ) {
       throw new Error(
-        "Transcription returned no words -- check the audio/GROQ_API_KEY"
+        "Transcription returned no words. Check the audio and GROQ_API_KEY."
       );
     }
 
     if (
-      !text ||
       typeof text !== "string" ||
       !text.trim()
     ) {
       throw new Error(
-        "Transcription returned no transcript text -- check the transcription service response."
+        "Transcription returned no transcript text."
       );
     }
 
     console.log(
-      `[${jobId}] Transcript received: ${text.length} characters, ${words.length} words`
+      `[${jobId}] Transcript received: ` +
+      `${text.length} characters, ` +
+      `${words.length} words`
     );
 
-    // ------------------------------------------------------------
-    // Step 2.5: Convert transcript words to chosen caption language
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
+    // Step 2.5: Caption language conversion
+    // ----------------------------------------------------------
 
-    // Hooks/snap still use ORIGINAL words so clip timing remains precise.
-    // Only captions use converted words.
     let captionWords = words;
 
-    if (captionLanguage !== "same") {
+    if (
+      captionLanguage !== "same"
+    ) {
       await pushStatus(jobId, {
         status: "transcribing",
         progress: 30,
         message:
-          "Caption language me convert kar rahe hain...",
+          "Converting captions to selected language",
       });
 
-      captionWords = await convertWords(
-        words,
-        captionLanguage,
-        audioLanguage
+      captionWords =
+        await convertWords(
+          words,
+          captionLanguage,
+          audioLanguage
+        );
+
+      if (
+        !Array.isArray(captionWords) ||
+        captionWords.length === 0
+      ) {
+        throw new Error(
+          "Caption conversion returned no words"
+        );
+      }
+    }
+
+    // ----------------------------------------------------------
+    // Step 3: Video duration
+    // ----------------------------------------------------------
+
+    const videoDuration =
+      await getVideoDuration(
+        sourcePath
+      );
+
+    if (
+      !Number.isFinite(videoDuration) ||
+      videoDuration <= 0
+    ) {
+      throw new Error(
+        "Could not determine source video duration"
       );
     }
 
-    // ------------------------------------------------------------
-    // Step 3: Get video duration
-    // ------------------------------------------------------------
+    console.log(
+      `[${jobId}] Video duration: ${videoDuration.toFixed(2)}s`
+    );
 
-    const videoDuration =
-      await getVideoDuration(sourcePath);
-
-    // ------------------------------------------------------------
-    // Step 4: Detect hook segments via Gemini
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
+    // Step 4: Hook detection
+    // ----------------------------------------------------------
 
     await pushStatus(jobId, {
       status: "detecting_hooks",
       progress: 40,
+      message:
+        "Finding the best hooks",
     });
 
-    /*
-     * IMPORTANT FIX:
-     *
-     * detectHooks.js now expects the actual transcript TEXT.
-     *
-     * OLD:
-     * detectHookSegments(words, clipCount, videoDuration)
-     *
-     * NEW:
-     * detectHookSegments(text)
-     *
-     * clipCount/videoDuration are no longer passed here because
-     * the current detectHooks.js handles Gemini hook extraction
-     * from the transcript itself.
-     */
-    const segments = await detectHookSegments(
-  text,
-  clipCount,
-  videoDuration,
-  words
-);
+    const segments =
+      await detectHookSegments(
+        text,
+        clipCount,
+        videoDuration,
+        words
+      );
 
     if (
-      !segments ||
+      !Array.isArray(segments) ||
       segments.length === 0
     ) {
       throw new Error(
@@ -323,24 +503,35 @@ async function runPipeline(jobId, ext, options) {
       );
     }
 
-    // Respect requested clip count.
     const selectedSegments =
-      segments.slice(0, clipCount);
+      segments.slice(
+        0,
+        clipCount
+      );
 
-    // ------------------------------------------------------------
-    // Step 5: Process each segment
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
+    // Step 5: Render clips
+    // ----------------------------------------------------------
 
     const clips = [];
-    const total = selectedSegments.length;
 
-    for (let i = 0; i < total; i++) {
-      // Snap AI's rough start/end to clean word boundaries.
-      const seg = snapSegmentToWords(
-        selectedSegments[i],
-        words,
-        videoDuration
-      );
+    const total =
+      selectedSegments.length;
+
+    for (
+      let i = 0;
+      i < total;
+      i++
+    ) {
+      const originalSegment =
+        selectedSegments[i];
+
+      const seg =
+        snapSegmentToWords(
+          originalSegment,
+          words,
+          videoDuration
+        );
 
       const clipNum = i + 1;
 
@@ -363,60 +554,65 @@ async function runPipeline(jobId, ext, options) {
       const editedFilename =
         `clip-${clipNum}-edited.mp4`;
 
-      const rawOutPath = path.join(
-        resultsDir,
-        rawFilename
-      );
+      const rawOutPath =
+        path.join(
+          resultsDir,
+          rawFilename
+        );
 
-      const editedOutPath = path.join(
-        resultsDir,
-        editedFilename
-      );
+      const editedOutPath =
+        path.join(
+          resultsDir,
+          editedFilename
+        );
 
-      const assPath = path.join(
-        tmpDir,
-        `captions-${clipNum}.ass`
-      );
+      const assPath =
+        path.join(
+          tmpDir,
+          `captions-${clipNum}.ass`
+        );
 
-      const clipDuration = Math.max(
-        0.1,
-        seg.endTime - seg.startTime
-      );
+      const clipDuration =
+        Math.max(
+          0.1,
+          Number(seg.endTime) -
+            Number(seg.startTime)
+        );
 
       console.log(
         `[${jobId}] clip ${clipNum}: ` +
-          `${seg.startTime.toFixed(1)}s - ` +
-          `${seg.endTime.toFixed(1)}s ` +
-          `(${clipDuration.toFixed(1)}s) ` +
-          `"${seg.title || ""}"`
+        `${Number(seg.startTime).toFixed(1)}s - ` +
+        `${Number(seg.endTime).toFixed(1)}s ` +
+        `(${clipDuration.toFixed(1)}s) ` +
+        `"${seg.title || ""}"`
       );
 
-      // ----------------------------------------------------------
-      // Cut raw clip
-      // ----------------------------------------------------------
+      // --------------------------------------------------------
+      // Raw clip
+      // --------------------------------------------------------
 
       await cutRawClip(
         sourcePath,
-        seg.startTime,
-        seg.endTime,
+        Number(seg.startTime),
+        Number(seg.endTime),
         rawOutPath
       );
 
-      // ----------------------------------------------------------
-      // Build captions
-      // ----------------------------------------------------------
+      // --------------------------------------------------------
+      // Captions
+      // --------------------------------------------------------
 
       buildAssCaptions(
         captionWords,
-        seg.startTime,
-        seg.endTime,
+        Number(seg.startTime),
+        Number(seg.endTime),
         captionColor,
         assPath
       );
 
-      // ----------------------------------------------------------
-      // Pick BGM
-      // ----------------------------------------------------------
+      // --------------------------------------------------------
+      // BGM
+      // --------------------------------------------------------
 
       const bgmPath = useBgm
         ? chooseBgmForSegment(
@@ -427,9 +623,9 @@ async function runPipeline(jobId, ext, options) {
           )
         : null;
 
-      // ----------------------------------------------------------
-      // Build edited clip
-      // ----------------------------------------------------------
+      // --------------------------------------------------------
+      // Edited clip
+      // --------------------------------------------------------
 
       await buildEditedClip(
         rawOutPath,
@@ -447,10 +643,14 @@ async function runPipeline(jobId, ext, options) {
           `Clip ${clipNum}`,
 
         hookReason:
-          seg.hookReason || "",
+          seg.hookReason ||
+          "",
 
-        startTime: seg.startTime,
-        endTime: seg.endTime,
+        startTime:
+          Number(seg.startTime),
+
+        endTime:
+          Number(seg.endTime),
 
         rawUrl:
           `/api/download/${jobId}/${rawFilename}`,
@@ -458,11 +658,23 @@ async function runPipeline(jobId, ext, options) {
         editedUrl:
           `/api/download/${jobId}/${editedFilename}`,
       });
+
+      // Give frontend a little more precise progress.
+      await pushStatus(jobId, {
+        status: "rendering",
+        progress:
+          45 +
+          Math.round(
+            ((i + 1) / total) * 50
+          ),
+        message:
+          `Clip ${clipNum} of ${total} completed`,
+      });
     }
 
-    // ------------------------------------------------------------
-    // Step 6: Cleanup tmp directory
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
+    // Step 6: Cleanup temporary files
+    // ----------------------------------------------------------
 
     try {
       fs.rmSync(
@@ -472,22 +684,28 @@ async function runPipeline(jobId, ext, options) {
           force: true,
         }
       );
-    } catch (e) {
+    } catch (cleanupError) {
       console.error(
         `[${jobId}] tmp cleanup failed (non-fatal):`,
-        e.message
+        cleanupError.message
       );
     }
 
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
     // Step 7: Done
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------
 
     await pushStatus(jobId, {
       status: "done",
       progress: 100,
+      message:
+        `${clips.length} clip${clips.length === 1 ? "" : "s"} ready`,
       clips,
     });
+
+    console.log(
+      `[${jobId}] Pipeline completed successfully`
+    );
   } catch (err) {
     try {
       fs.rmSync(
@@ -497,11 +715,28 @@ async function runPipeline(jobId, ext, options) {
           force: true,
         }
       );
-    } catch (e) {}
+    } catch (cleanupError) {
+      // Non-fatal.
+    }
 
     throw err;
   }
 }
+
+// ------------------------------------------------------------
+// Health check
+// ------------------------------------------------------------
+
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "captify-worker",
+  });
+});
+
+// ------------------------------------------------------------
+// Start worker
+// ------------------------------------------------------------
 
 app.listen(PORT, () => {
   console.log(
@@ -510,5 +745,9 @@ app.listen(PORT, () => {
 
   console.log(
     `STORAGE_DIR = ${STORAGE_DIR}`
+  );
+
+  console.log(
+    `NEXT_APP_URL = ${NEXT_APP_URL}`
   );
 });
