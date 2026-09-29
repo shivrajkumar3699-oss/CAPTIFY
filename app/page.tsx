@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { upload } from "@vercel/blob/client";
 
 type ClipResult = {
   index: number;
@@ -520,78 +521,21 @@ export default function Home() {
 
       setJobId(newJobId);
 
-      await new Promise<void>(
-        (resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-
-          xhr.open(
-            "PUT",
-            `/api/upload?jobId=${encodeURIComponent(
-              newJobId
-            )}&ext=${encodeURIComponent(
-              extension
-            )}`
-          );
-
-          xhr.upload.onprogress = (
-            event
-          ) => {
-            if (event.lengthComputable) {
-              setUploadProgress(
-                Math.round(
-                  (event.loaded /
-                    event.total) *
-                    100
-                )
-              );
-            }
-          };
-
-          xhr.onload = () => {
-            if (
-              xhr.status >= 200 &&
-              xhr.status < 300
-            ) {
-              resolve();
-              return;
-            }
-
-            try {
-              const data =
-                JSON.parse(
-                  xhr.responseText
-                );
-
-              reject(
-                new Error(
-                  data.error ||
-                    "Upload failed."
-                )
-              );
-            } catch {
-              reject(
-                new Error("Upload failed.")
-              );
-            }
-          };
-
-          xhr.onerror = () => {
-            reject(
-              new Error(
-                "Network error while uploading the file."
-              )
+      const blob = await upload(
+        `uploads/${newJobId}/source.${extension}`,
+        file,
+        {
+          access: "public",
+          handleUploadUrl: "/api/upload",
+          clientPayload: JSON.stringify({
+            jobId: newJobId,
+            ext: extension,
+          }),
+          onUploadProgress: (event) => {
+            setUploadProgress(
+              Math.round(event.percentage)
             );
-          };
-
-          xhr.onabort = () => {
-            reject(
-              new Error(
-                "Upload was cancelled."
-              )
-            );
-          };
-
-          xhr.send(file);
+          },
         }
       );
 
@@ -607,6 +551,7 @@ export default function Home() {
           body: JSON.stringify({
             jobId: newJobId,
             ext: extension,
+            sourceUrl: blob.url,
             options: {
               bgm,
               captionColor,
