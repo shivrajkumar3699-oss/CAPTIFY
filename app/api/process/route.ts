@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
         safeOptions.framing || "fit",
     });
 
-    setJobStatus(jobId, {
+    await setJobStatus(jobId, {
       status: "queued",
       progress: 0,
       message:
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    fetch(
+    const workerResponse = await fetch(
       `${workerUrl.replace(/\/+$/, "")}/process`,
       {
         method: "POST",
@@ -114,15 +114,11 @@ export async function POST(req: NextRequest) {
           ext,
           sourceUrl: workerSourceUrl,
           options: safeOptions,
+          statusUrl: `${req.nextUrl.origin}/api/internal/status`,
         }),
       }
-    ).catch((err) => {
-      console.error(
-        "Failed to reach worker:",
-        err
-      );
-    });
-
+    );
+    if (!workerResponse.ok) { const workerText=await workerResponse.text().catch(()=>""); await setJobStatus(jobId,{status:"error",progress:0,message:"Worker could not start the job",error:workerText||`Worker returned HTTP ${workerResponse.status}`}); return NextResponse.json({error:"Worker could not start the processing job."},{status:502}); }
     return NextResponse.json({
       jobId,
       status: "queued",
