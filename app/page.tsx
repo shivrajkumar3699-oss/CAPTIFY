@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { upload } from "@vercel/blob/client";
 
 type ClipResult = {
   index: number;
@@ -521,25 +520,72 @@ export default function Home() {
 
       setJobId(newJobId);
 
-      const blob = await upload(
-        `uploads/${newJobId}/source.${extension}`,
-        file,
-        {
-          access: "public",
-          handleUploadUrl: "/api/upload",
-          clientPayload: JSON.stringify({
-            jobId: newJobId,
-            ext: extension,
-          }),
-          onUploadProgress: (event) => {
-            setUploadProgress(
-              Math.round(event.percentage)
-            );
-          },
-        }
-      );
+      const uploadSetupResponse = await fetch("/api/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jobId: newJobId,
+          ext: extension,
+        }),
+      });
 
-      setUploadProgress(100);
+      const uploadSetupData = await uploadSetupResponse.json();
+
+      if (!uploadSetupResponse.ok || !uploadSetupData.presignedUrl) {
+        throw new Error(
+          uploadSetupData.error ||
+            "Could not prepare the video upload."
+        );
+      }
+
+      const pathname =
+        uploadSetupData.pathname as string;
+      const presignedUrl =
+        uploadSetupData.presignedUrl as string;
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        xhr.open("PUT", presignedUrl);
+        xhr.setRequestHeader(
+          "Content-Type",
+          file.type || "application/octet-stream"
+        );
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            setUploadProgress(
+              Math.round((event.loaded / event.total) * 100)
+            );
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadProgress(100);
+            resolve();
+            return;
+          }
+
+          reject(
+            new Error(
+              `Blob upload failed (HTTP ${xhr.status}).`
+            )
+          );
+        };
+
+        xhr.onerror = () => {
+          reject(new Error("Network error while uploading the file."));
+        };
+
+        xhr.onabort = () => {
+          reject(new Error("Upload was cancelled."));
+        };
+
+        xhr.send(file);
+      });
 
       const processResponse =
         await fetch("/api/process", {
@@ -551,7 +597,7 @@ export default function Home() {
           body: JSON.stringify({
             jobId: newJobId,
             ext: extension,
-            sourceUrl: blob.url,
+            sourcePathname: pathname,
             options: {
               bgm,
               captionColor,
