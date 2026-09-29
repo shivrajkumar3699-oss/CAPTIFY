@@ -4,6 +4,8 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const { Readable } = require("stream");
+const { pipeline } = require("stream/promises");
 
 const { extractAudio, transcribeWithTimestamps } = require("./lib/transcribe");
 const { detectHookSegments } = require("./lib/detectHooks");
@@ -181,12 +183,23 @@ app.post("/process", checkSecret, (req, res) => {
   const {
     jobId,
     ext,
+    sourceUrl,
     options,
   } = req.body || {};
 
-  if (!jobId || !ext) {
+  if (!jobId || !ext || !sourceUrl) {
     return res.status(400).json({
-      error: "jobId and ext are required",
+      error:
+        "jobId, ext, and sourceUrl are required",
+    });
+  }
+
+  if (
+    typeof sourceUrl !== "string" ||
+    !/^https?:\/\//i.test(sourceUrl)
+  ) {
+    return res.status(400).json({
+      error: "Invalid sourceUrl",
     });
   }
 
@@ -221,6 +234,7 @@ app.post("/process", checkSecret, (req, res) => {
   runPipeline(
     cleanJobId,
     cleanExt,
+    sourceUrl,
     options || {}
   ).catch(async (err) => {
     console.error(
@@ -248,6 +262,7 @@ app.post("/process", checkSecret, (req, res) => {
 async function runPipeline(
   jobId,
   ext,
+  sourceUrl,
   options
 ) {
   if (!STORAGE_DIR) {
@@ -324,6 +339,31 @@ async function runPipeline(
   const usedBgmFiles = new Set();
 
   try {
+    // ----------------------------------------------------------
+    // Download source from Vercel Blob
+    // ----------------------------------------------------------
+
+    if (!sourceUrl) {
+      throw new Error("Source URL is required");
+    }
+
+    console.log(
+      `[${jobId}] Downloading source from Blob`
+    );
+
+    const blobResponse = await fetch(sourceUrl);
+
+    if (!blobResponse.ok || !blobResponse.body) {
+      throw new Error(
+        `Failed to download source from Blob (HTTP ${blobResponse.status})`
+      );
+    }
+
+    await pipeline(
+      Readable.fromWeb(blobResponse.body),
+      fs.createWriteStream(sourcePath)
+    );
+
     // ----------------------------------------------------------
     // Validate source
     // ----------------------------------------------------------
