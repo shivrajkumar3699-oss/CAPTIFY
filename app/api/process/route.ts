@@ -18,12 +18,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { jobId, ext, options } = await req.json();
+    const { jobId, ext, sourceUrl, options } =
+      await req.json();
 
-    if (!jobId || !ext) {
+    if (!jobId || !ext || !sourceUrl) {
       return NextResponse.json(
         {
-          error: "jobId and ext required",
+          error:
+            "jobId, ext, and sourceUrl are required",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      typeof sourceUrl !== "string" ||
+      !/^https?:\/\//i.test(sourceUrl)
+    ) {
+      return NextResponse.json(
+        {
+          error: "Invalid sourceUrl.",
         },
         { status: 400 }
       );
@@ -82,6 +96,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           jobId,
           ext,
+          sourceUrl,
           options: safeOptions,
         }),
       }
