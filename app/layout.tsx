@@ -4,7 +4,7 @@ import "./globals.css";
 import AccountNav from "@/components/account-nav";
 
 export const metadata: Metadata = {
-  title: "Captify — Turn long videos into viral reels",
+  title: "CAPTIFYY — Turn long videos into viral reels",
   description:
     "Upload a long video, get 5-7 hook-driven, auto-captioned reels in one click.",
 };
