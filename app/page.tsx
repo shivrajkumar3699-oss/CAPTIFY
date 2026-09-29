@@ -525,7 +525,7 @@ export default function Home() {
         `uploads/${newJobId}/source.${extension}`,
         file,
         {
-          access: "public",
+          access: "private",
           handleUploadUrl: "/api/upload",
           clientPayload: JSON.stringify({
             jobId: newJobId,
