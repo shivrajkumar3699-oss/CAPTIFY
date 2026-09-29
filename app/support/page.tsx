@@ -39,7 +39,7 @@ const FAQS = [
   {
     question: "Why did my video fail during processing?",
     answer:
-      "Processing can fail because of an unsupported/corrupted media file, an unusual codec, a temporary processing issue or another media-specific problem. Try another file first. If the same problem continues, use Report a Problem below.",
+      "Processing can fail because of an unsupported or corrupted media file, an unusual codec, a temporary processing issue or another media-specific problem. Try another file first. If the same problem continues, use Report a Problem below.",
   },
   {
     question: "Can I change the caption language?",
@@ -183,6 +183,30 @@ export default function SupportPage() {
     document.title = "Support — CAPTIFY";
   }, []);
 
+  const customNumericAmount = customAmount
+    ? Number(customAmount)
+    : null;
+
+  const customAmountTooLow =
+    customNumericAmount !== null &&
+    Number.isFinite(customNumericAmount) &&
+    customNumericAmount < MIN_AMOUNT;
+
+  const customAmountTooHigh =
+    customNumericAmount !== null &&
+    Number.isFinite(customNumericAmount) &&
+    customNumericAmount > MAX_AMOUNT;
+
+  const customAmountInvalid =
+    customAmountTooLow || customAmountTooHigh;
+
+  const hasValidCustomAmount =
+    customAmount !== "" &&
+    customNumericAmount !== null &&
+    Number.isFinite(customNumericAmount) &&
+    customNumericAmount >= MIN_AMOUNT &&
+    customNumericAmount <= MAX_AMOUNT;
+
   const qrData = useMemo(() => {
     return (
       `upi://pay?pa=${encodeURIComponent(UPI_ID)}` +
@@ -211,6 +235,8 @@ export default function SupportPage() {
   }, []);
 
   const openUPI = () => {
+    if (customAmountInvalid) return;
+
     window.location.href = qrData;
   };
 
@@ -232,9 +258,7 @@ export default function SupportPage() {
     setCustomAmount("");
   };
 
-  const handleCustomAmount = (
-    value: string
-  ) => {
+  const handleCustomAmount = (value: string) => {
     const clean = value.replace(/[^\d]/g, "");
 
     setCustomAmount(clean);
@@ -249,12 +273,9 @@ export default function SupportPage() {
       return;
     }
 
-    const safeAmount = Math.min(
-      MAX_AMOUNT,
-      Math.max(MIN_AMOUNT, numeric)
-    );
-
-    setAmount(safeAmount);
+    if (numeric >= MIN_AMOUNT && numeric <= MAX_AMOUNT) {
+      setAmount(numeric);
+    }
   };
 
   return (
@@ -335,19 +356,262 @@ export default function SupportPage() {
           MAIN
       ====================================================== */}
 
-      <div className="mx-auto max-w-[1180px] px-5 pb-24 pt-14 sm:px-8 sm:pt-20">
+      <div className="mx-auto max-w-[1180px] px-5 pb-24 pt-10 sm:px-8 sm:pt-14">
 
         {/* ===================================================
-            HERO
+            SUPPORT / DONATION — TOP
         ==================================================== */}
 
-        <section className="max-w-4xl">
+        <section className="relative overflow-hidden rounded-[42px] border border-white/[0.09] bg-white/[0.035] shadow-[0_35px_120px_rgba(0,0,0,.35)] backdrop-blur-3xl">
+
+          <div
+            className="pointer-events-none absolute left-1/2 top-[-180px] h-[420px] w-[720px] -translate-x-1/2 rounded-full blur-[130px]"
+            style={{
+              background:
+                "radial-gradient(ellipse,rgba(247,208,2,.12),rgba(240,6,153,.07),transparent 72%)",
+            }}
+          />
+
+          <div className="relative p-7 sm:p-10 lg:p-12">
+
+            <div className="max-w-3xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
+                <Icon name="heart" size={13} />
+                Optional Support
+              </div>
+
+              <h1 className="mt-6 text-4xl font-black tracking-[-0.055em] sm:text-6xl">
+                Help keep{" "}
+                <span
+                  style={{
+                    background:
+                      "linear-gradient(100deg,#F7D002,#FF7A00,#F00699)",
+                    WebkitBackgroundClip: "text",
+                    backgroundClip: "text",
+                    color: "transparent",
+                  }}
+                >
+                  CAPTIFY
+                </span>{" "}
+                moving.
+              </h1>
+
+              <p className="mt-5 max-w-2xl text-sm leading-7 text-white/35 sm:text-base">
+                If you enjoy using CAPTIFY and want to support the project,
+                you can leave an optional tip. Every amount is completely
+                optional.
+              </p>
+            </div>
+
+            {/* Amount selector */}
+
+            <div className="relative mt-10">
+              <div className="mb-4 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
+                    Choose amount
+                  </p>
+
+                  <p className="mt-1 text-xs text-white/20">
+                    Minimum ₹21 · Maximum ₹21,000
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-[9px] font-black uppercase tracking-[0.15em] text-white/20">
+                    Selected
+                  </span>
+
+                  <div className="mt-1 text-xl font-black text-[#F7D002]">
+                    ₹{amount.toLocaleString("en-IN")}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                {QUICK_AMOUNTS.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => handleQuickAmount(value)}
+                    className={`relative min-h-[58px] rounded-2xl border text-sm font-black transition ${
+                      amount === value && !customAmount
+                        ? "border-[#F7D002]/60 bg-[#F7D002]/[0.11] text-[#F7D002] shadow-[0_10px_35px_rgba(247,208,2,.08)]"
+                        : "border-white/[0.08] bg-black/20 text-white/45 hover:border-white/[0.16] hover:bg-white/[0.04] hover:text-white"
+                    }`}
+                  >
+                    ₹{value.toLocaleString("en-IN")}
+
+                    {value === 199 && (
+                      <span className="absolute -right-1.5 -top-2 rounded-full bg-[#F7D002] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-black">
+                        Popular
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Custom amount */}
+
+              <div className="mt-4">
+                <label className="mb-2 block text-[9px] font-black uppercase tracking-[0.18em] text-white/25">
+                  Custom amount
+                </label>
+
+                <div
+                  className={`flex items-center overflow-hidden rounded-2xl border bg-black/25 transition focus-within:border-[#F7D002]/35 ${
+                    customAmountInvalid
+                      ? "border-red-500/70"
+                      : "border-white/[0.08]"
+                  }`}
+                >
+                  <span className="pl-4 text-lg font-black text-[#F7D002]">
+                    ₹
+                  </span>
+
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={customAmount}
+                    onChange={(event) =>
+                      handleCustomAmount(event.target.value)
+                    }
+                    placeholder="Enter any amount"
+                    className="min-w-0 flex-1 bg-transparent px-3 py-4 text-sm font-bold text-white outline-none placeholder:text-white/20"
+                  />
+                </div>
+
+                {customAmountTooLow && (
+                  <p className="mt-2 text-xs font-bold text-red-500">
+                    Minimum support should be ₹21.
+                  </p>
+                )}
+
+                {customAmountTooHigh && (
+                  <p className="mt-2 text-xs font-bold text-red-500">
+                    Maximum support is ₹21,000.
+                  </p>
+                )}
+
+                {!customAmountInvalid && (
+                  <p className="mt-2 text-[9px] text-white/20">
+                    Enter any amount from ₹21 to ₹21,000.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Payment area */}
+
+            <div className="relative mt-10 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+
+              {/* QR */}
+
+              <div
+                className={`rounded-[30px] border bg-black/25 p-6 text-center transition sm:p-8 ${
+                  customAmountInvalid
+                    ? "border-red-500/20 opacity-60"
+                    : "border-white/[0.08]"
+                }`}
+              >
+                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#F7D002]">
+                  Scan to pay
+                </p>
+
+                <div className="mx-auto mt-6 flex w-fit items-center justify-center rounded-[25px] border border-white/[0.09] bg-white p-4 shadow-[0_25px_80px_rgba(0,0,0,.35)]">
+                  <img
+                    src={qrUrl}
+                    alt={`UPI QR code for ₹${amount}`}
+                    className="h-[220px] w-[220px] rounded-xl sm:h-[260px] sm:w-[260px]"
+                  />
+                </div>
+
+                <p className="mt-5 text-xs font-bold text-white/35">
+                  Scan with your preferred UPI app
+                </p>
+
+                <p className="mt-1 text-[10px] text-white/20">
+                  Amount: ₹{amount.toLocaleString("en-IN")}
+                </p>
+              </div>
+
+              {/* Payment controls */}
+
+              <div className="rounded-[30px] border border-white/[0.08] bg-black/25 p-6 sm:p-8">
+                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#FF7A00]">
+                  UPI payment
+                </p>
+
+                <div className="mt-5 rounded-2xl border border-[#F7D002]/10 bg-[#F7D002]/[0.035] p-5">
+                  <p className="text-[8px] font-black uppercase tracking-[0.16em] text-white/25">
+                    UPI ID
+                  </p>
+
+                  <div className="mt-2 break-all text-base font-black text-white">
+                    {UPI_ID}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={copyUPI}
+                    className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/[0.09] bg-white/[0.04] px-4 py-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:border-[#F7D002]/25 hover:text-[#F7D002]"
+                  >
+                    <Icon name="copy" size={13} />
+                    {copied ? "Copied!" : "Copy UPI ID"}
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={openUPI}
+                  disabled={customAmountInvalid}
+                  className={`mt-4 flex w-full items-center justify-between rounded-2xl px-5 py-4 text-xs font-black uppercase tracking-[0.1em] transition ${
+                    customAmountInvalid
+                      ? "cursor-not-allowed bg-white/[0.06] text-white/20"
+                      : "bg-[#F7D002] text-black shadow-[0_15px_50px_rgba(247,208,2,.10)] hover:-translate-y-0.5 hover:brightness-105"
+                  }`}
+                >
+                  <span>
+                    {customAmountInvalid
+                      ? "Fix Amount First"
+                      : "Open UPI App"}
+                  </span>
+
+                  <Icon name="arrow" size={17} />
+                </button>
+
+                <div className="mt-5 flex gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
+                  <div className="mt-0.5 shrink-0 text-[#F7D002]">
+                    <Icon name="shield" size={17} />
+                  </div>
+
+                  <p className="text-[10px] leading-5 text-white/25">
+                    Payments are handled through your UPI app. CAPTIFY does
+                    not ask for your UPI PIN, card details or banking
+                    credentials.
+                  </p>
+                </div>
+
+                <p className="mt-5 text-center text-[9px] leading-5 text-white/20">
+                  Support is completely optional. CAPTIFY does not unlock
+                  features or provide special access in exchange for a tip.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ===================================================
+            SUPPORT HERO
+        ==================================================== */}
+
+        <section className="mt-16 max-w-4xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
             <Icon name="help" size={13} />
             CAPTIFY Support
           </div>
 
-          <h1 className="mt-7 text-5xl font-black tracking-[-0.055em] sm:text-7xl">
+          <h2 className="mt-7 text-5xl font-black tracking-[-0.055em] sm:text-7xl">
             Need a{" "}
             <span
               style={{
@@ -360,11 +624,11 @@ export default function SupportPage() {
             >
               hand?
             </span>
-          </h1>
+          </h2>
 
           <p className="mt-6 max-w-2xl text-base leading-7 text-white/40 sm:text-lg">
-            Find answers to the questions that usually come up while uploading,
-            processing and creating clips with CAPTIFY.
+            Find answers to the questions that usually come up while
+            uploading, processing and creating clips with CAPTIFY.
           </p>
         </section>
 
@@ -497,8 +761,8 @@ export default function SupportPage() {
 
               <p className="mt-4 text-sm leading-7 text-white/35">
                 If the FAQ and troubleshooting steps did not solve the problem,
-                report it directly. Gmail will open with the recipient, subject
-                and a useful starter template already filled in.
+                report it directly. Gmail will open with the recipient,
+                subject and a useful starter template already filled in.
               </p>
 
               <div className="mt-5 flex items-center gap-2 text-xs text-white/25">
@@ -516,212 +780,6 @@ export default function SupportPage() {
               <Icon name="mail" size={16} />
               Report a Problem
             </a>
-          </div>
-        </section>
-
-        {/* ===================================================
-            SUPPORT / DONATION
-        ==================================================== */}
-
-        <section className="relative mt-16 overflow-hidden rounded-[42px] border border-white/[0.09] bg-white/[0.035] shadow-[0_35px_120px_rgba(0,0,0,.35)] backdrop-blur-3xl">
-
-          {/* Donation aura */}
-          <div
-            className="pointer-events-none absolute left-1/2 top-[-180px] h-[420px] w-[720px] -translate-x-1/2 rounded-full blur-[130px]"
-            style={{
-              background:
-                "radial-gradient(ellipse,rgba(247,208,2,.10),rgba(240,6,153,.06),transparent 72%)",
-            }}
-          />
-
-          <div className="relative p-7 sm:p-10 lg:p-12">
-
-            {/* Donation heading */}
-            <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
-                <Icon name="heart" size={13} />
-                Optional Support
-              </div>
-
-              <h2 className="mt-6 text-4xl font-black tracking-[-0.045em] sm:text-5xl">
-                Help keep{" "}
-                <span
-                  style={{
-                    background:
-                      "linear-gradient(100deg,#F7D002,#FF7A00,#F00699)",
-                    WebkitBackgroundClip: "text",
-                    backgroundClip: "text",
-                    color: "transparent",
-                  }}
-                >
-                  CAPTIFY
-                </span>{" "}
-                moving.
-              </h2>
-
-              <p className="mt-5 max-w-2xl text-sm leading-7 text-white/35 sm:text-base">
-                CAPTIFY is built to make the repetitive parts of video
-                editing easier. If you enjoy using it and want to support the
-                project, you can leave an optional tip.
-              </p>
-            </div>
-
-            {/* Amount selector */}
-            <div className="relative mt-10">
-              <div className="mb-4 flex items-end justify-between gap-4">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
-                    Choose amount
-                  </p>
-
-                  <p className="mt-1 text-xs text-white/20">
-                    Minimum ₹{MIN_AMOUNT.toLocaleString("en-IN")} · Maximum ₹
-                    {MAX_AMOUNT.toLocaleString("en-IN")}
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <span className="text-[9px] font-black uppercase tracking-[0.15em] text-white/20">
-                    Selected
-                  </span>
-
-                  <div className="mt-1 text-xl font-black text-[#F7D002]">
-                    ₹{amount.toLocaleString("en-IN")}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-                {QUICK_AMOUNTS.map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => handleQuickAmount(value)}
-                    className={`relative min-h-[58px] rounded-2xl border text-sm font-black transition ${
-                      amount === value && !customAmount
-                        ? "border-[#F7D002]/60 bg-[#F7D002]/[0.11] text-[#F7D002] shadow-[0_10px_35px_rgba(247,208,2,.08)]"
-                        : "border-white/[0.08] bg-black/20 text-white/45 hover:border-white/[0.16] hover:bg-white/[0.04] hover:text-white"
-                    }`}
-                  >
-                    ₹{value.toLocaleString("en-IN")}
-
-                    {value === 199 && (
-                      <span className="absolute -right-1.5 -top-2 rounded-full bg-[#F7D002] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-black">
-                        Popular
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              {/* Custom amount */}
-              <div className="mt-4">
-                <label className="mb-2 block text-[9px] font-black uppercase tracking-[0.18em] text-white/25">
-                  Custom amount
-                </label>
-
-                <div className="flex items-center overflow-hidden rounded-2xl border border-white/[0.08] bg-black/25 focus-within:border-[#F7D002]/35">
-                  <span className="pl-4 text-lg font-black text-[#F7D002]">
-                    ₹
-                  </span>
-
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={customAmount}
-                    onChange={(event) =>
-                      handleCustomAmount(event.target.value)
-                    }
-                    placeholder="Enter any amount"
-                    className="min-w-0 flex-1 bg-transparent px-3 py-4 text-sm font-bold text-white outline-none placeholder:text-white/20"
-                  />
-                </div>
-
-                <p className="mt-2 text-[9px] text-white/20">
-                  Enter any amount from ₹21 to ₹21,000.
-                </p>
-              </div>
-            </div>
-
-            {/* Payment area */}
-            <div className="relative mt-10 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-
-              {/* QR */}
-              <div className="rounded-[30px] border border-white/[0.08] bg-black/25 p-6 text-center sm:p-8">
-                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#F7D002]">
-                  Scan to pay
-                </p>
-
-                <div className="mx-auto mt-6 flex w-fit items-center justify-center rounded-[25px] border border-white/[0.09] bg-white p-4 shadow-[0_25px_80px_rgba(0,0,0,.35)]">
-                  <img
-                    src={qrUrl}
-                    alt={`UPI QR code for ₹${amount}`}
-                    className="h-[220px] w-[220px] rounded-xl sm:h-[260px] sm:w-[260px]"
-                  />
-                </div>
-
-                <p className="mt-5 text-xs font-bold text-white/35">
-                  Scan with your preferred UPI app
-                </p>
-
-                <p className="mt-1 text-[10px] text-white/20">
-                  Amount: ₹{amount.toLocaleString("en-IN")}
-                </p>
-              </div>
-
-              {/* Payment controls */}
-              <div className="rounded-[30px] border border-white/[0.08] bg-black/25 p-6 sm:p-8">
-                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#FF7A00]">
-                  UPI payment
-                </p>
-
-                <div className="mt-5 rounded-2xl border border-[#F7D002]/10 bg-[#F7D002]/[0.035] p-5">
-                  <p className="text-[8px] font-black uppercase tracking-[0.16em] text-white/25">
-                    UPI ID
-                  </p>
-
-                  <div className="mt-2 break-all text-base font-black text-white">
-                    {UPI_ID}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={copyUPI}
-                    className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/[0.09] bg-white/[0.04] px-4 py-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:border-[#F7D002]/25 hover:text-[#F7D002]"
-                  >
-                    <Icon name="copy" size={13} />
-                    {copied ? "Copied!" : "Copy UPI ID"}
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={openUPI}
-                  className="mt-4 flex w-full items-center justify-between rounded-2xl bg-[#F7D002] px-5 py-4 text-xs font-black uppercase tracking-[0.1em] text-black shadow-[0_15px_50px_rgba(247,208,2,.10)] transition hover:-translate-y-0.5 hover:brightness-105"
-                >
-                  <span>Open UPI App</span>
-
-                  <Icon name="arrow" size={17} />
-                </button>
-
-                <div className="mt-5 flex gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
-                  <div className="mt-0.5 shrink-0 text-[#F7D002]">
-                    <Icon name="shield" size={17} />
-                  </div>
-
-                  <p className="text-[10px] leading-5 text-white/25">
-                    Payments are handled through your UPI app. CAPTIFY does
-                    not ask for your UPI PIN, card details or banking
-                    credentials.
-                  </p>
-                </div>
-
-                <p className="mt-5 text-center text-[9px] leading-5 text-white/20">
-                  Support is completely optional. CAPTIFY does not unlock
-                  features or provide special access in exchange for a tip.
-                </p>
-              </div>
-            </div>
           </div>
         </section>
 
