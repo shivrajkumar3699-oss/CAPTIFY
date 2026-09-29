@@ -62,7 +62,7 @@ export default function HistoryPage() {
       <main className="min-h-screen bg-[#030303] px-5 py-24 text-white">
         <section className="mx-auto max-w-2xl rounded-[36px] border border-white/[0.08] bg-white/[0.035] p-10 text-center backdrop-blur-3xl">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-[#F7D002]/[0.08] text-2xl font-black text-[#F7D002]">C</div>
-          <p className="mt-7 text-[10px] font-black uppercase tracking-[0.3em] text-[#F7D002]">CAPTIFY HISTORY</p>
+          <p className="mt-7 text-[10px] font-black uppercase tracking-[0.3em] text-[#F7D002]">CAPTIFYY HISTORY</p>
           <h1 className="mt-4 text-4xl font-black tracking-tight">Your history lives here.</h1>
           <p className="mx-auto mt-4 max-w-lg text-sm leading-7 text-white/40">Sign in to see your saved project dates, titles, clip counts and timestamps.</p>
           <SignInButton mode="modal">
@@ -77,7 +77,7 @@ export default function HistoryPage() {
     <main className="min-h-screen bg-[#030303] px-5 pb-20 pt-24 text-white sm:px-8">
       <div className="mx-auto max-w-6xl">
         <Link href="/" className="text-xs font-bold text-white/45 hover:text-white">← Studio</Link>
-        <p className="mt-8 text-[10px] font-black uppercase tracking-[0.32em] text-[#F7D002]">CAPTIFY / HISTORY</p>
+        <p className="mt-8 text-[10px] font-black uppercase tracking-[0.32em] text-[#F7D002]">CAPTIFYY / HISTORY</p>
         <div className="mt-3 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <h1 className="text-5xl font-black tracking-[-0.05em] sm:text-7xl">Your history.</h1>
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-5 py-3">
@@ -91,7 +91,7 @@ export default function HistoryPage() {
         {!loading && !error && projects.length === 0 && (
           <section className="mt-12 rounded-[32px] border border-white/[0.08] bg-white/[0.025] p-12 text-center">
             <h2 className="text-2xl font-black">No projects yet.</h2>
-            <p className="mt-3 text-sm text-white/35">Create a CAPTIFY project and it will appear here.</p>
+            <p className="mt-3 text-sm text-white/35">Create a CAPTIFYY project and it will appear here.</p>
           </section>
         )}
 
@@ -102,7 +102,7 @@ export default function HistoryPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-[9px] font-black uppercase tracking-[0.18em] text-[#F7D002]">{formatDate(project.createdAt)}</p>
-                    <h2 className="mt-2 truncate text-xl font-black">{project.originalFilename || "CAPTIFY Project"}</h2>
+                    <h2 className="mt-2 truncate text-xl font-black">{project.originalFilename || "CAPTIFYY Project"}</h2>
                   </div>
                   <div className="shrink-0 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-4 py-2 text-xs font-black text-[#F7D002]">{project.numClips} clips</div>
                 </div>
