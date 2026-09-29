@@ -232,12 +232,17 @@ app.post("/process", checkSecret, (req, res) => {
   });
 
   // Process in background.
+  const callbackStatusUrl =
+    typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl)
+      ? statusUrl
+      : NEXT_APP_URL;
+
   runPipeline(
     cleanJobId,
     cleanExt,
     sourceUrl,
     options || {},
-    typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl) ? statusUrl : NEXT_APP_URL
+    callbackStatusUrl
   ).catch(async (err) => {
     console.error(
       `[${cleanJobId}] Pipeline crashed:`,
@@ -248,12 +253,16 @@ app.post("/process", checkSecret, (req, res) => {
       err?.message ||
       "Unknown processing error";
 
-    await pushStatus(cleanJobId, {
-      status: "error",
-      progress: 0,
-      message: "Processing failed",
-      error: message,
-    });
+    await pushStatus(
+      cleanJobId,
+      {
+        status: "error",
+        progress: 0,
+        message: "Processing failed",
+        error: message,
+      },
+      callbackStatusUrl
+    );
   });
 });
 
