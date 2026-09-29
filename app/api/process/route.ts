@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
+import { issueSignedToken, presignUrl } from "@vercel/blob";
 import { setJobStatus } from "@/lib/jobStore";
 import { updateProjectOptions } from "@/lib/history";
 
@@ -18,30 +19,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { jobId, ext, sourceUrl, options } =
+    const { jobId, ext, sourcePathname, options } =
       await req.json();
 
-    if (!jobId || !ext || !sourceUrl) {
+    if (!jobId || !ext || !sourcePathname) {
       return NextResponse.json(
         {
           error:
-            "jobId, ext, and sourceUrl are required",
+            "jobId, ext, and sourcePathname are required",
         },
         { status: 400 }
       );
     }
 
     if (
-      typeof sourceUrl !== "string" ||
-      !/^https?:\/\//i.test(sourceUrl)
+      typeof sourcePathname !== "string" ||
+      !/^uploads\/[a-zA-Z0-9_-]+\/source\.(mp3|wav|mp4|mkv)$/i.test(
+        sourcePathname
+      )
     ) {
       return NextResponse.json(
         {
-          error: "Invalid sourceUrl.",
+          error: "Invalid sourcePathname.",
         },
         { status: 400 }
       );
     }
+
+    const signedToken = await issueSignedToken({
+      pathname: sourcePathname,
+      operations: ["get"],
+      validUntil: Date.now() + 60 * 60 * 1000,
+    });
+
+    const { presignedUrl: workerSourceUrl } =
+      await presignUrl(signedToken, {
+        pathname: sourcePathname,
+        operation: "get",
+        access: "private",
+        validUntil: Date.now() + 60 * 60 * 1000,
+      });
 
     const safeOptions = options || {};
 
@@ -72,8 +89,7 @@ export async function POST(req: NextRequest) {
         "Job queued, waiting for worker to pick it up",
     });
 
-    const workerUrl =
-      process.env.WORKER_URL;
+    const workerUrl = process.env.WORKER_URL;
 
     if (!workerUrl) {
       return NextResponse.json(
@@ -116,7 +132,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "Failed to start processing",
+        error:
+          err instanceof Error
+            ? err.message
+            : "Failed to start processing",
       },
       { status: 500 }
     );
