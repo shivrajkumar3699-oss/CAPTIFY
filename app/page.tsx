@@ -371,7 +371,10 @@ export default function Home() {
     if (isDone) return 100;
 
     if (isProcessing) {
-      return Math.max(0, Math.min(99, status?.progress ?? 0));
+      // Never let a queued job visually sit at 0% while the worker is
+      // starting. Keep the processing UI moving until real worker progress
+      // arrives, while still preserving every real progress value.
+      return Math.max(1, Math.min(99, status?.progress ?? 1));
     }
 
     return Math.max(0, Math.min(100, uploadProgress));
