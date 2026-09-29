@@ -7,27 +7,15 @@ import { useEffect, useState } from "react";
 type HistoryClip = {
   id: number;
   clipIndex: number;
-  title: string;
-  hookReason: string | null;
   startTime: number;
   endTime: number;
-  rawUrl: string | null;
-  editedUrl: string | null;
 };
 
 type HistoryProject = {
   id: number;
-  jobId: string;
   originalFilename: string | null;
-  videoLanguage: string | null;
-  captionLanguage: string | null;
-  captionColor: string | null;
   numClips: number;
-  bgmEnabled: boolean;
-  framing: string | null;
-  status: string;
   createdAt: string;
-  completedAt: string | null;
   clips: HistoryClip[];
 };
 
@@ -50,25 +38,6 @@ function formatTime(seconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(
     remaining
   ).padStart(2, "0")}`;
-}
-
-function statusLabel(status: string) {
-  switch (status) {
-    case "queued":
-      return "Queued";
-    case "transcribing":
-      return "Transcribing";
-    case "detecting_hooks":
-      return "Finding hooks";
-    case "rendering":
-      return "Rendering";
-    case "done":
-      return "Completed";
-    case "error":
-      return "Failed";
-    default:
-      return status;
-  }
 }
 
 export default function HistoryPage() {
