@@ -494,9 +494,22 @@ export default function Home() {
       );
 
       if (!createResponse.ok) {
-        throw new Error(
-          "Could not create the processing job."
-        );
+        let message = "Could not create the processing job.";
+
+        try {
+          const data = await createResponse.json();
+
+          if (
+            typeof data.error === "string" &&
+            data.error.trim()
+          ) {
+            message = data.error;
+          }
+        } catch {
+          // Keep the fallback message if the response is not JSON.
+        }
+
+        throw new Error(message);
       }
 
       const createData =
