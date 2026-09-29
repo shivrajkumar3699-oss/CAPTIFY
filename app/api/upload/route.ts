@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import { pipeline } from "stream/promises";
+import { auth } from "@clerk/nextjs/server";
+import {
+  handleUpload,
+  type HandleUploadBody,
+} from "@vercel/blob/client";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
@@ -14,185 +16,117 @@ const ALLOWED_EXTENSIONS = new Set([
   "mkv",
 ]);
 
-export async function PUT(req: NextRequest) {
-  const jobId = req.nextUrl.searchParams.get("jobId");
+export async function POST(request: Request) {
+  try {
+    const { isAuthenticated, userId } = await auth();
 
-  const rawExt =
-    req.nextUrl.searchParams.get("ext") || "mp4";
-
-  const ext = rawExt
-    .toLowerCase()
-    .replace(/^\./, "");
-
-  if (!jobId) {
-    return NextResponse.json(
-      { error: "jobId required" },
-      { status: 400 }
-    );
-  }
-
-  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
-    return NextResponse.json(
-      { error: "Invalid jobId" },
-      { status: 400 }
-    );
-  }
-
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
-    return NextResponse.json(
-      {
-        error:
-          "Unsupported file type. Allowed: MP3, WAV, MP4, MKV.",
-      },
-      { status: 400 }
-    );
-  }
-
-  if (!req.body) {
-    return NextResponse.json(
-      { error: "No file received" },
-      { status: 400 }
-    );
-  }
-
-  const contentLength =
-    req.headers.get("content-length");
-
-  if (contentLength) {
-    const size = Number(contentLength);
-
-    if (
-      Number.isFinite(size) &&
-      size > MAX_UPLOAD_SIZE
-    ) {
+    if (!isAuthenticated || !userId) {
       return NextResponse.json(
         {
           error:
-            "File is too large. CAPTIFY supports files up to 3 GB.",
+            "Please sign in before uploading a file.",
         },
-        { status: 413 }
+        { status: 401 }
       );
     }
-  }
 
-  const storageDir =
-    process.env.STORAGE_DIR;
+    const body = (await request.json()) as HandleUploadBody;
 
-  if (!storageDir) {
-    return NextResponse.json(
-      {
-        error:
-          "STORAGE_DIR is not configured.",
-      },
-      { status: 500 }
-    );
-  }
+    const result = await handleUpload({
+      body,
+      request,
+      onBeforeGenerateToken: async (
+        pathname,
+        clientPayload
+      ) => {
+        let payload: {
+          jobId?: string;
+          ext?: string;
+        } = {};
 
-  const dir = path.join(
-    storageDir,
-    "uploads",
-    jobId
-  );
-
-  fs.mkdirSync(dir, {
-    recursive: true,
-  });
-
-  const filePath = path.join(
-    dir,
-    `source.${ext}`
-  );
-
-  let receivedBytes = 0;
-
-  /*
-   * Bridge the Next.js Web ReadableStream directly
-   * into a Node-compatible async iterable.
-   *
-   * This avoids the ReadableStream type mismatch
-   * between DOM/Web Streams and Node stream/web.
-   */
-  const bodyStream = req.body;
-
-  const limitedStream = async function* () {
-    const reader = bodyStream.getReader();
-
-    try {
-      while (true) {
-        const { done, value } =
-          await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        if (!value) {
-          continue;
-        }
-
-        const buffer = Buffer.from(value);
-
-        receivedBytes += buffer.length;
-
-        if (
-          receivedBytes >
-          MAX_UPLOAD_SIZE
-        ) {
+        try {
+          payload = clientPayload
+            ? JSON.parse(clientPayload)
+            : {};
+        } catch {
           throw new Error(
-            "UPLOAD_SIZE_LIMIT_EXCEEDED"
+            "Invalid upload payload."
           );
         }
 
-        yield buffer;
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  };
+        const jobId = String(
+          payload.jobId || ""
+        ).trim();
 
-  try {
-    await pipeline(
-      limitedStream(),
-      fs.createWriteStream(filePath)
-    );
+        const ext = String(
+          payload.ext || ""
+        )
+          .trim()
+          .toLowerCase()
+          .replace(/^\./, "");
+
+        if (
+          !jobId ||
+          !/^[a-zA-Z0-9_-]+$/.test(jobId)
+        ) {
+          throw new Error("Invalid jobId.");
+        }
+
+        if (!ALLOWED_EXTENSIONS.has(ext)) {
+          throw new Error(
+            "Unsupported file type. Allowed: MP3, WAV, MP4, MKV."
+          );
+        }
+
+        if (
+          !pathname.startsWith(
+            `uploads/${jobId}/source.`
+          )
+        ) {
+          throw new Error(
+            "Invalid upload path."
+          );
+        }
+
+        return {
+          allowedContentTypes: [
+            "audio/mpeg",
+            "audio/wav",
+            "audio/x-wav",
+            "video/mp4",
+            "video/x-matroska",
+          ],
+          maximumSizeInBytes:
+            MAX_UPLOAD_SIZE,
+          addRandomSuffix: false,
+          tokenPayload: JSON.stringify({
+            userId,
+            jobId,
+            ext,
+          }),
+        };
+      },
+      onUploadCompleted: async () => {
+        // The worker downloads the Blob directly after
+        // the processing request is created.
+      },
+    });
+
+    return NextResponse.json(result);
   } catch (error) {
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch {}
-
-    if (
-      error instanceof Error &&
-      error.message ===
-        "UPLOAD_SIZE_LIMIT_EXCEEDED"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "File is too large. CAPTIFY supports files up to 3 GB.",
-        },
-        { status: 413 }
-      );
-    }
-
     console.error(
-      "[upload] Upload failed:",
+      "[upload] Client upload setup failed:",
       error
     );
 
     return NextResponse.json(
       {
         error:
-          "Upload failed while saving the file.",
+          error instanceof Error
+            ? error.message
+            : "Could not prepare the upload.",
       },
       { status: 500 }
     );
   }
-
-  return NextResponse.json({
-    ok: true,
-    ext,
-    size: receivedBytes,
-  });
 }
