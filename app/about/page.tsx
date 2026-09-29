@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 
 function Icon({
   name,
@@ -61,7 +62,6 @@ export default function AboutPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#030303] text-white">
-      {/* Background */}
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div
           className="absolute left-[-180px] top-[-180px] h-[560px] w-[560px] rounded-full blur-[150px]"
@@ -82,10 +82,9 @@ export default function AboutPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.28)_55%,rgba(0,0,0,.8)_100%)]" />
       </div>
 
-      {/* Header */}
       <header className="sticky top-0 z-50 px-3 pt-3 sm:px-5 lg:px-7">
         <div className="mx-auto flex max-w-[1480px] items-center justify-between rounded-[30px] border border-white/[0.09] bg-black/60 px-4 py-3 shadow-[0_25px_90px_rgba(0,0,0,.45)] backdrop-blur-3xl sm:px-6">
-          <a href="/" className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-[15px] border border-[#F7D002]/30 bg-[#F7D002]/[0.08] text-base font-black text-[#F7D002]">
               C
             </div>
@@ -99,33 +98,28 @@ export default function AboutPage() {
                 AI Caption Studio
               </div>
             </div>
-          </a>
+          </Link>
 
           <nav className="flex items-center gap-1">
-            <a
+            <Link
               href="/"
               className="rounded-full px-4 py-2.5 text-sm font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
             >
               Studio
-            </a>
+            </Link>
 
-            <a
+            <Link
               href="/support"
               className="rounded-full px-4 py-2.5 text-sm font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
             >
               Support
-            </a>
+            </Link>
           </nav>
         </div>
       </header>
 
-      {/* Main */}
       <div className="mx-auto max-w-[1180px] px-5 pb-20 pt-10 sm:px-8 sm:pt-16">
-
-        {/* Creator Hero */}
         <section className="relative mb-20 overflow-hidden rounded-[42px] border border-white/[0.08] bg-white/[0.025] px-5 py-14 text-center shadow-[0_35px_120px_rgba(0,0,0,.35)] backdrop-blur-2xl sm:px-10 sm:py-20">
-
-          {/* Aura */}
           <div
             className="pointer-events-none absolute left-1/2 top-1/2 h-[330px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[120px]"
             style={{
@@ -134,7 +128,6 @@ export default function AboutPage() {
             }}
           />
 
-          {/* Small aura emojis */}
           <div className="relative flex items-center justify-center gap-4 text-2xl sm:text-3xl">
             <span className="drop-shadow-[0_0_18px_rgba(247,208,2,.45)]">
               👑
@@ -180,7 +173,6 @@ export default function AboutPage() {
           </p>
         </section>
 
-        {/* About Hero */}
         <section className="max-w-4xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
             <Icon name="spark" size={13} />
@@ -199,7 +191,6 @@ export default function AboutPage() {
           </p>
         </section>
 
-        {/* Feature Cards */}
         <section className="mt-16 grid gap-4 md:grid-cols-3">
           {[
             [
@@ -236,7 +227,6 @@ export default function AboutPage() {
           ))}
         </section>
 
-        {/* Idea */}
         <section className="mt-16 rounded-[34px] border border-white/[0.08] bg-white/[0.035] p-7 backdrop-blur-2xl sm:p-10">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
             The idea
@@ -274,25 +264,23 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* CTA */}
         <div className="mt-10 flex flex-wrap items-center gap-4">
-          <a
+          <Link
             href="/"
             className="inline-flex items-center gap-2 rounded-full bg-[#F7D002] px-5 py-3 text-xs font-black uppercase tracking-[0.1em] text-black transition hover:brightness-105"
           >
             Open Studio
             <Icon name="arrow" size={14} />
-          </a>
+          </Link>
 
-          <a
+          <Link
             href="/support"
             className="rounded-full border border-white/[0.09] bg-white/[0.04] px-5 py-3 text-xs font-bold text-white/55 transition hover:text-white"
           >
             Get Support
-          </a>
+          </Link>
         </div>
 
-        {/* Footer */}
         <footer className="mt-24 border-t border-white/[0.07] pt-7 text-xs text-white/25">
           CAPTIFY · Your videos. Captions, perfected. · MADE BY SHIVRAJ KUMAR
         </footer>

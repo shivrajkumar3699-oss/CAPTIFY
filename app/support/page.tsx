@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 const SUPPORT_EMAIL = "lwithshiv@gmail.com";
 const UPI_ID = "shivrajkumar666@fam";
@@ -200,13 +201,6 @@ export default function SupportPage() {
   const customAmountInvalid =
     customAmountTooLow || customAmountTooHigh;
 
-  const hasValidCustomAmount =
-    customAmount !== "" &&
-    customNumericAmount !== null &&
-    Number.isFinite(customNumericAmount) &&
-    customNumericAmount >= MIN_AMOUNT &&
-    customNumericAmount <= MAX_AMOUNT;
-
   const qrData = useMemo(() => {
     return (
       `upi://pay?pa=${encodeURIComponent(UPI_ID)}` +
@@ -280,10 +274,6 @@ export default function SupportPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#030303] text-white">
-      {/* =====================================================
-          BACKGROUND AURA
-      ====================================================== */}
-
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div
           className="absolute left-[-220px] top-[-220px] h-[650px] w-[650px] rounded-full blur-[160px]"
@@ -312,13 +302,9 @@ export default function SupportPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.25)_55%,rgba(0,0,0,.82)_100%)]" />
       </div>
 
-      {/* =====================================================
-          HEADER
-      ====================================================== */}
-
       <header className="sticky top-0 z-50 px-3 pt-3 sm:px-5 lg:px-7">
         <div className="mx-auto flex max-w-[1480px] items-center justify-between rounded-[30px] border border-white/[0.09] bg-black/60 px-4 py-3 shadow-[0_25px_90px_rgba(0,0,0,.5)] backdrop-blur-3xl sm:px-6">
-          <a href="/" className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-[15px] border border-[#F7D002]/30 bg-[#F7D002]/[0.08] text-base font-black text-[#F7D002]">
               C
             </div>
@@ -332,38 +318,28 @@ export default function SupportPage() {
                 AI Caption Studio
               </div>
             </div>
-          </a>
+          </Link>
 
           <nav className="flex items-center gap-1">
-            <a
+            <Link
               href="/"
               className="rounded-full px-4 py-2.5 text-sm font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
             >
               Studio
-            </a>
+            </Link>
 
-            <a
+            <Link
               href="/about"
               className="rounded-full px-4 py-2.5 text-sm font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
             >
               About
-            </a>
+            </Link>
           </nav>
         </div>
       </header>
 
-      {/* =====================================================
-          MAIN
-      ====================================================== */}
-
       <div className="mx-auto max-w-[1180px] px-5 pb-24 pt-10 sm:px-8 sm:pt-14">
-
-        {/* ===================================================
-            SUPPORT / DONATION — TOP
-        ==================================================== */}
-
         <section className="relative overflow-hidden rounded-[42px] border border-white/[0.09] bg-white/[0.035] shadow-[0_35px_120px_rgba(0,0,0,.35)] backdrop-blur-3xl">
-
           <div
             className="pointer-events-none absolute left-1/2 top-[-180px] h-[420px] w-[720px] -translate-x-1/2 rounded-full blur-[130px]"
             style={{
@@ -373,7 +349,6 @@ export default function SupportPage() {
           />
 
           <div className="relative p-7 sm:p-10 lg:p-12">
-
             <div className="max-w-3xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
                 <Icon name="heart" size={13} />
@@ -402,8 +377,6 @@ export default function SupportPage() {
                 optional.
               </p>
             </div>
-
-            {/* Amount selector */}
 
             <div className="relative mt-10">
               <div className="mb-4 flex items-end justify-between gap-4">
@@ -450,8 +423,6 @@ export default function SupportPage() {
                   </button>
                 ))}
               </div>
-
-              {/* Custom amount */}
 
               <div className="mt-4">
                 <label className="mb-2 block text-[9px] font-black uppercase tracking-[0.18em] text-white/25">
@@ -501,12 +472,7 @@ export default function SupportPage() {
               </div>
             </div>
 
-            {/* Payment area */}
-
             <div className="relative mt-10 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-
-              {/* QR */}
-
               <div
                 className={`rounded-[30px] border bg-black/25 p-6 text-center transition sm:p-8 ${
                   customAmountInvalid
@@ -534,8 +500,6 @@ export default function SupportPage() {
                   Amount: ₹{amount.toLocaleString("en-IN")}
                 </p>
               </div>
-
-              {/* Payment controls */}
 
               <div className="rounded-[30px] border border-white/[0.08] bg-black/25 p-6 sm:p-8">
                 <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#FF7A00]">
@@ -601,10 +565,6 @@ export default function SupportPage() {
           </div>
         </section>
 
-        {/* ===================================================
-            SUPPORT HERO
-        ==================================================== */}
-
         <section className="mt-16 max-w-4xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
             <Icon name="help" size={13} />
@@ -632,19 +592,13 @@ export default function SupportPage() {
           </p>
         </section>
 
-        {/* ===================================================
-            QUICK SUPPORT CARDS
-        ==================================================== */}
-
         <section className="mt-14 grid gap-4 md:grid-cols-3">
           <div className="rounded-[30px] border border-white/[0.08] bg-white/[0.035] p-6 backdrop-blur-2xl">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[#F7D002]/15 bg-[#F7D002]/[0.07] text-[#F7D002]">
               <Icon name="upload" size={20} />
             </div>
 
-            <h2 className="mt-7 text-xl font-bold">
-              Upload issues
-            </h2>
+            <h2 className="mt-7 text-xl font-bold">Upload issues</h2>
 
             <p className="mt-2 text-sm leading-6 text-white/35">
               Check your file type, file size and internet connection first.
@@ -657,9 +611,7 @@ export default function SupportPage() {
               <Icon name="processing" size={20} />
             </div>
 
-            <h2 className="mt-7 text-xl font-bold">
-              Processing issues
-            </h2>
+            <h2 className="mt-7 text-xl font-bold">Processing issues</h2>
 
             <p className="mt-2 text-sm leading-6 text-white/35">
               Longer videos can take more time. Keep the Studio tab open while
@@ -672,9 +624,7 @@ export default function SupportPage() {
               <Icon name="bug" size={20} />
             </div>
 
-            <h2 className="mt-7 text-xl font-bold">
-              Something broken?
-            </h2>
+            <h2 className="mt-7 text-xl font-bold">Something broken?</h2>
 
             <p className="mt-2 text-sm leading-6 text-white/35">
               If the same problem keeps happening, send the exact error and
@@ -682,10 +632,6 @@ export default function SupportPage() {
             </p>
           </div>
         </section>
-
-        {/* ===================================================
-            FAQ
-        ==================================================== */}
 
         <section className="mt-16">
           <div className="mb-6">
@@ -731,10 +677,6 @@ export default function SupportPage() {
             ))}
           </div>
         </section>
-
-        {/* ===================================================
-            REPORT PROBLEM
-        ==================================================== */}
 
         <section className="relative mt-16 overflow-hidden rounded-[38px] border border-white/[0.08] bg-white/[0.035] p-7 backdrop-blur-2xl sm:p-10">
           <div
@@ -783,10 +725,6 @@ export default function SupportPage() {
           </div>
         </section>
 
-        {/* ===================================================
-            FINAL HELP
-        ==================================================== */}
-
         <section className="mt-16 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.05] text-[#F7D002]">
             <Icon name="heart" size={21} />
@@ -801,28 +739,20 @@ export default function SupportPage() {
             built to make your editing workflow simpler.
           </p>
 
-          <a
+          <Link
             href="/"
             className="mt-7 inline-flex items-center gap-2 rounded-full border border-white/[0.09] bg-white/[0.04] px-5 py-3 text-xs font-black uppercase tracking-[0.1em] text-white/55 transition hover:border-[#F7D002]/25 hover:text-[#F7D002]"
           >
             Back to Studio
             <Icon name="arrow" size={14} />
-          </a>
+          </Link>
         </section>
-
-        {/* ===================================================
-            FOOTER
-        ==================================================== */}
 
         <footer className="mt-24 border-t border-white/[0.07] pt-7 text-xs text-white/25">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              CAPTIFY · Your videos. Captions, perfected.
-            </span>
+            <span>CAPTIFY · Your videos. Captions, perfected.</span>
 
-            <span>
-              MADE BY SHIVRAJ KUMAR
-            </span>
+            <span>MADE BY SHIVRAJ KUMAR</span>
           </div>
         </footer>
       </div>

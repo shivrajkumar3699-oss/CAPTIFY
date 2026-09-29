@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 
 export const runtime = "nodejs";
@@ -17,6 +16,7 @@ const ALLOWED_EXTENSIONS = new Set([
 
 export async function PUT(req: NextRequest) {
   const jobId = req.nextUrl.searchParams.get("jobId");
+
   const rawExt =
     req.nextUrl.searchParams.get("ext") || "mp4";
 
@@ -105,24 +105,48 @@ export async function PUT(req: NextRequest) {
 
   let receivedBytes = 0;
 
-  const nodeStream = Readable.fromWeb(
-    req.body as any
-  );
+  /*
+   * Bridge the Next.js Web ReadableStream directly
+   * into a Node-compatible async iterable.
+   *
+   * This avoids the ReadableStream type mismatch
+   * between DOM/Web Streams and Node stream/web.
+   */
+  const bodyStream = req.body;
 
   const limitedStream = async function* () {
-    for await (const chunk of nodeStream) {
-      receivedBytes += Buffer.byteLength(chunk);
+    const reader = bodyStream.getReader();
 
-      if (
-        receivedBytes >
-        MAX_UPLOAD_SIZE
-      ) {
-        throw new Error(
-          "UPLOAD_SIZE_LIMIT_EXCEEDED"
-        );
+    try {
+      while (true) {
+        const { done, value } =
+          await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        if (!value) {
+          continue;
+        }
+
+        const buffer = Buffer.from(value);
+
+        receivedBytes += buffer.length;
+
+        if (
+          receivedBytes >
+          MAX_UPLOAD_SIZE
+        ) {
+          throw new Error(
+            "UPLOAD_SIZE_LIMIT_EXCEEDED"
+          );
+        }
+
+        yield buffer;
       }
-
-      yield chunk;
+    } finally {
+      reader.releaseLock();
     }
   };
 

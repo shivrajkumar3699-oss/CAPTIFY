@@ -5,3 +5,5 @@ storage/
 .env.local
 .env.*
 !.env.example
+.vercel
+.env*
