@@ -351,6 +351,11 @@ async function runPipeline(
       `[${jobId}] Downloading source from Blob`
     );
 
+    fs.mkdirSync(
+      path.dirname(sourcePath),
+      { recursive: true }
+    );
+
     const blobResponse = await fetch(sourceUrl);
 
     if (!blobResponse.ok || !blobResponse.body) {
