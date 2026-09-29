@@ -21,7 +21,7 @@ export async function POST() {
 
     await createProject({ userId, jobId });
 
-    setJobStatus(jobId, {
+    await setJobStatus(jobId, {
       status: "queued",
       progress: 0,
       message: "Job created. Waiting for upload.",
