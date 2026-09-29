@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type ClipResult = {
   index: number;
@@ -333,7 +339,11 @@ export default function Home() {
   const [videoLanguage, setVideoLanguage] = useState("auto");
   const [captionLanguage, setCaptionLanguage] = useState("same");
   const [captionColor, setCaptionColor] = useState("#FFE600");
+
+  // ONLY 1–7 CLIPS.
+  // Default = 6.
   const [numClips, setNumClips] = useState(6);
+
   const [bgm, setBgm] = useState(true);
   const [framing, setFraming] = useState<"fill" | "fit">("fill");
 
@@ -356,13 +366,21 @@ export default function Home() {
 
   const progress = useMemo(() => {
     if (isProcessing) {
-      return Math.min(99, Math.max(uploadProgress, status?.progress || 0));
+      return Math.min(
+        99,
+        Math.max(uploadProgress, status?.progress || 0)
+      );
     }
 
     if (isDone) return 100;
 
     return uploadProgress;
-  }, [isProcessing, isDone, status?.progress, uploadProgress]);
+  }, [
+    isProcessing,
+    isDone,
+    status?.progress,
+    uploadProgress,
+  ]);
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -378,18 +396,25 @@ export default function Home() {
   const fetchStatus = useCallback(
     async (id: string) => {
       try {
-        const response = await fetch(`/api/status/${id}`, {
-          cache: "no-store",
-        });
+        const response = await fetch(
+          `/api/status/${encodeURIComponent(id)}`,
+          {
+            cache: "no-store",
+          }
+        );
 
         if (!response.ok) {
           throw new Error("Unable to read job status.");
         }
 
         const data = (await response.json()) as JobStatus;
+
         setStatus(data);
 
-        if (data.status === "done" || data.status === "error") {
+        if (
+          data.status === "done" ||
+          data.status === "error"
+        ) {
           stopPolling();
         }
       } catch (err) {
@@ -412,32 +437,43 @@ export default function Home() {
     [fetchStatus, stopPolling]
   );
 
-  const handleFile = useCallback((selectedFile: File | null) => {
-    if (!selectedFile) return;
+  const handleFile = useCallback(
+    (selectedFile: File | null) => {
+      if (!selectedFile) return;
 
-    const validationError = validateFile(selectedFile);
+      const validationError =
+        validateFile(selectedFile);
 
-    if (validationError) {
-      setError(validationError);
-      setFile(null);
-      return;
-    }
+      if (validationError) {
+        setError(validationError);
+        setFile(null);
+        return;
+      }
 
-    setError("");
-    setFile(selectedFile);
-    setStatus(null);
-    setJobId("");
-    setUploadProgress(0);
-  }, []);
+      setError("");
+      setFile(selectedFile);
+      setStatus(null);
+      setJobId("");
+      setUploadProgress(0);
+    },
+    []
+  );
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
     handleFile(event.target.files?.[0] || null);
   };
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (
+    event: React.DragEvent<HTMLDivElement>
+  ) => {
     event.preventDefault();
     setIsDragging(false);
-    handleFile(event.dataTransfer.files?.[0] || null);
+
+    handleFile(
+      event.dataTransfer.files?.[0] || null
+    );
   };
 
   const handleStart = async () => {
@@ -450,88 +486,137 @@ export default function Home() {
     try {
       const extension = getExtension(file.name);
 
-      const createResponse = await fetch("/api/create-job", {
-        method: "POST",
-      });
+      const createResponse = await fetch(
+        "/api/create-job",
+        {
+          method: "POST",
+        }
+      );
 
       if (!createResponse.ok) {
-        throw new Error("Could not create the processing job.");
+        throw new Error(
+          "Could not create the processing job."
+        );
       }
 
-      const createData = await createResponse.json();
-      const newJobId = createData.jobId as string;
+      const createData =
+        await createResponse.json();
+
+      const newJobId =
+        createData.jobId as string;
 
       setJobId(newJobId);
 
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
+      await new Promise<void>(
+        (resolve, reject) => {
+          const xhr = new XMLHttpRequest();
 
-        xhr.open(
-          "PUT",
-          `/api/upload?jobId=${encodeURIComponent(
-            newJobId
-          )}&ext=${encodeURIComponent(extension)}`
-        );
+          xhr.open(
+            "PUT",
+            `/api/upload?jobId=${encodeURIComponent(
+              newJobId
+            )}&ext=${encodeURIComponent(
+              extension
+            )}`
+          );
 
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            setUploadProgress(
-              Math.round((event.loaded / event.total) * 100)
-            );
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            try {
-              const data = JSON.parse(xhr.responseText);
-              reject(new Error(data.error || "Upload failed."));
-            } catch {
-              reject(new Error("Upload failed."));
+          xhr.upload.onprogress = (
+            event
+          ) => {
+            if (event.lengthComputable) {
+              setUploadProgress(
+                Math.round(
+                  (event.loaded /
+                    event.total) *
+                    100
+                )
+              );
             }
-          }
-        };
+          };
 
-        xhr.onerror = () => {
-          reject(new Error("Network error while uploading the file."));
-        };
+          xhr.onload = () => {
+            if (
+              xhr.status >= 200 &&
+              xhr.status < 300
+            ) {
+              resolve();
+              return;
+            }
 
-        xhr.onabort = () => {
-          reject(new Error("Upload was cancelled."));
-        };
+            try {
+              const data =
+                JSON.parse(
+                  xhr.responseText
+                );
 
-        xhr.send(file);
-      });
+              reject(
+                new Error(
+                  data.error ||
+                    "Upload failed."
+                )
+              );
+            } catch {
+              reject(
+                new Error("Upload failed.")
+              );
+            }
+          };
+
+          xhr.onerror = () => {
+            reject(
+              new Error(
+                "Network error while uploading the file."
+              )
+            );
+          };
+
+          xhr.onabort = () => {
+            reject(
+              new Error(
+                "Upload was cancelled."
+              )
+            );
+          };
+
+          xhr.send(file);
+        }
+      );
 
       setUploadProgress(100);
 
-      const processResponse = await fetch("/api/process", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jobId: newJobId,
-          ext: extension,
-          options: {
-            bgm,
-            captionColor,
-            numClips,
-            audioLanguage: videoLanguage,
-            captionLanguage,
-            framing,
+      const processResponse =
+        await fetch("/api/process", {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
           },
-        }),
-      });
+          body: JSON.stringify({
+            jobId: newJobId,
+            ext: extension,
+            options: {
+              bgm,
+              captionColor,
+              // This is exactly the 1–7 slider value.
+              numClips,
+              audioLanguage:
+                videoLanguage,
+              captionLanguage,
+              framing,
+            },
+          }),
+        });
 
       if (!processResponse.ok) {
-        let message = "Could not start processing.";
+        let message =
+          "Could not start processing.";
 
         try {
-          const data = await processResponse.json();
-          message = data.error || message;
+          const data =
+            await processResponse.json();
+
+          message =
+            data.error || message;
         } catch {}
 
         throw new Error(message);
@@ -541,52 +626,63 @@ export default function Home() {
         jobId: newJobId,
         status: "queued",
         progress: 0,
-        message: "Job queued, waiting for CAPTIFY AI...",
+        message:
+          "Job queued, waiting for CAPTIFY AI...",
       });
 
       startPolling(newJobId);
     } catch (err) {
       console.error(err);
 
-      setError(
+      const message =
         err instanceof Error
           ? err.message
-          : "Something went wrong. Please try again."
-      );
+          : "Something went wrong. Please try again.";
+
+      setError(message);
 
       setStatus((current) =>
         current
           ? {
               ...current,
               status: "error",
-              error:
-                err instanceof Error
-                  ? err.message
-                  : "Something went wrong.",
+              error: message,
             }
           : null
       );
     }
   };
 
-  const copyTimestamps = async (clip: ClipResult) => {
+  const copyTimestamps = async (
+    clip: ClipResult
+  ) => {
     try {
       await navigator.clipboard.writeText(
-        `${clip.title}\n${timeRange(clip.startTime, clip.endTime)}`
+        `${clip.title}\n${timeRange(
+          clip.startTime,
+          clip.endTime
+        )}`
       );
 
       setCopied(clip.index);
 
       setTimeout(() => {
-        setCopied((current) => (current === clip.index ? null : current));
+        setCopied((current) =>
+          current === clip.index
+            ? null
+            : current
+        );
       }, 1800);
     } catch {
-      setError("Could not copy the timestamp.");
+      setError(
+        "Could not copy the timestamp."
+      );
     }
   };
 
   const startOver = () => {
     stopPolling();
+
     setFile(null);
     setJobId("");
     setStatus(null);
@@ -617,11 +713,11 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#050505] text-white">
+    <main className="min-h-screen overflow-x-hidden bg-[#030303] text-white">
       {/* Ambient background */}
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div
-          className="absolute left-[-180px] top-[-180px] h-[520px] w-[520px] rounded-full blur-[130px]"
+          className="absolute left-[-220px] top-[-220px] h-[650px] w-[650px] rounded-full blur-[150px]"
           style={{
             background:
               "radial-gradient(circle, rgba(247,208,2,.13), transparent 68%)",
@@ -629,43 +725,53 @@ export default function Home() {
         />
 
         <div
-          className="absolute right-[-180px] top-[18%] h-[480px] w-[480px] rounded-full blur-[140px]"
+          className="absolute right-[-220px] top-[12%] h-[600px] w-[600px] rounded-full blur-[160px]"
           style={{
             background:
-              "radial-gradient(circle, rgba(240,6,153,.10), transparent 68%)",
+              "radial-gradient(circle, rgba(240,6,153,.09), transparent 68%)",
           }}
         />
 
         <div
-          className="absolute bottom-[-220px] left-[30%] h-[520px] w-[520px] rounded-full blur-[150px]"
+          className="absolute bottom-[-260px] left-[28%] h-[600px] w-[600px] rounded-full blur-[170px]"
           style={{
             background:
-              "radial-gradient(circle, rgba(247,208,2,.07), transparent 68%)",
+              "radial-gradient(circle, rgba(247,208,2,.06), transparent 68%)",
           }}
         />
 
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.28)_70%,rgba(0,0,0,.65)_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.25)_55%,rgba(0,0,0,.72)_100%)]" />
+
+        <div
+          className="absolute inset-0 opacity-[0.035]"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(255,255,255,.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.35) 1px, transparent 1px)",
+            backgroundSize: "80px 80px",
+          }}
+        />
       </div>
 
       {/* Header */}
-      <header className="sticky top-0 z-50 px-4 pt-4 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-[1450px] items-center justify-between rounded-[28px] border border-white/[0.09] bg-white/[0.045] px-4 py-3 shadow-[0_20px_70px_rgba(0,0,0,.35)] backdrop-blur-2xl sm:px-6">
+      <header className="sticky top-0 z-50 px-3 pt-3 sm:px-5 lg:px-7">
+        <div className="mx-auto flex max-w-[1480px] items-center justify-between rounded-[30px] border border-white/[0.09] bg-black/55 px-4 py-3 shadow-[0_25px_90px_rgba(0,0,0,.45)] backdrop-blur-3xl sm:px-6">
           <a
             href="#top"
-            className="group flex min-w-0 items-center gap-3"
+            className="group flex items-center gap-3"
           >
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-[#F7D002]/30 bg-[#F7D002]/[0.09] shadow-[0_0_35px_rgba(247,208,2,.12)]">
-              <span className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-transparent" />
-              <span className="relative text-sm font-black text-[#F7D002]">
+            <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[15px] border border-[#F7D002]/30 bg-[#F7D002]/[0.08] shadow-[0_0_35px_rgba(247,208,2,.12)]">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-transparent" />
+              <span className="relative text-base font-black text-[#F7D002]">
                 C
               </span>
             </div>
 
-            <div className="min-w-0">
-              <div className="truncate text-[13px] font-black uppercase tracking-[0.22em] text-white sm:text-[15px]">
+            <div>
+              <div className="text-sm font-black uppercase tracking-[0.24em]">
                 CAPTIFY
               </div>
-              <div className="hidden truncate text-[9px] font-medium uppercase tracking-[0.2em] text-white/35 sm:block">
+
+              <div className="hidden text-[8px] font-semibold uppercase tracking-[0.28em] text-white/30 sm:block">
                 AI Caption Studio
               </div>
             </div>
@@ -674,21 +780,21 @@ export default function Home() {
           <nav className="hidden items-center gap-1 md:flex">
             <a
               href="/about"
-              className="rounded-full px-4 py-2 text-sm font-medium text-white/55 transition hover:bg-white/[0.06] hover:text-white"
+              className="rounded-full px-4 py-2.5 text-sm font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
             >
               About
             </a>
 
             <a
               href="#how-it-works"
-              className="rounded-full px-4 py-2 text-sm font-medium text-white/55 transition hover:bg-white/[0.06] hover:text-white"
+              className="rounded-full px-4 py-2.5 text-sm font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
             >
               How it works
             </a>
 
             <a
               href="/support"
-              className="rounded-full px-4 py-2 text-sm font-medium text-white/55 transition hover:bg-white/[0.06] hover:text-white"
+              className="rounded-full px-4 py-2.5 text-sm font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
             >
               Support
             </a>
@@ -710,91 +816,139 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main */}
-      <div id="top" className="mx-auto max-w-[1450px] px-4 pb-24 pt-10 sm:px-6 sm:pt-16 lg:px-8">
-        {/* Creator branding */}
-        <section className="relative mb-10">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.035] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-white/40 backdrop-blur-xl">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#F7D002] shadow-[0_0_12px_#F7D002]" />
-            Crafted by Shivraj Kumar
-          </div>
+      <div
+        id="top"
+        className="mx-auto max-w-[1480px] px-4 pb-28 pt-12 sm:px-6 sm:pt-20 lg:px-8"
+      >
+        {/* Premium creator hero */}
+        <section className="relative mb-14">
+          <div className="absolute -left-20 top-10 h-32 w-32 rounded-full bg-[#F7D002]/10 blur-[80px]" />
 
-          <h1
-            className="max-w-5xl text-5xl font-black uppercase leading-[0.88] tracking-[-0.055em] sm:text-7xl lg:text-[108px]"
-            style={{
-              background:
-                "linear-gradient(110deg,#ffffff 0%,#ffffff 35%,#F7D002 63%,#F00699 100%)",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            MADE BY
-            <br />
-            SHIVRAJ KUMAR
-          </h1>
-
-          <div className="mt-6 flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="relative grid gap-10 lg:grid-cols-[1.4fr_.6fr] lg:items-end">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#F7D002]">
-                AI Caption Studio
-              </p>
+              <div className="mb-6 flex items-center gap-3">
+                <span className="h-px w-10 bg-[#F7D002]/60" />
 
-              <p className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                Your videos. Captions, perfected.
-              </p>
+                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[#F7D002]">
+                  Independent creator studio
+                </span>
+              </div>
 
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/45 sm:text-base">
-                Turn speech into polished, ready-to-use captions and short
-                clips with one intelligent workflow.
-              </p>
+              <h1 className="max-w-6xl text-[13vw] font-black uppercase leading-[0.78] tracking-[-0.075em] sm:text-7xl lg:text-[105px] xl:text-[120px]">
+                <span className="block text-white">
+                  MADE BY
+                </span>
+
+                <span
+                  className="block bg-gradient-to-r from-white via-[#F7D002] to-[#F00699] bg-clip-text text-transparent"
+                  style={{
+                    WebkitBackgroundClip:
+                      "text",
+                  }}
+                >
+                  SHIVRAJ
+                </span>
+
+                <span className="block text-white/90">
+                  KUMAR
+                </span>
+              </h1>
+
+              <div className="mt-8 flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-end">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.28em] text-[#F7D002]">
+                    CAPTIFY · AI CAPTION STUDIO
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                    Your videos. Captions, perfected.
+                  </p>
+
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-white/40 sm:text-base">
+                    Turn speech into polished captions and
+                    intelligent short clips with a workflow
+                    designed around your content.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="hidden shrink-0 sm:block">
-              <div className="flex items-center gap-2 text-xs font-medium text-white/30">
-                <span className="h-2 w-2 rounded-full bg-[#F7D002] shadow-[0_0_15px_#F7D002]" />
-                AI powered
-                <span className="text-white/15">•</span>
-                Fast
-                <span className="text-white/15">•</span>
-                Precise
+            <div className="hidden lg:block">
+              <div className="ml-auto max-w-[310px] rounded-[28px] border border-white/[0.08] bg-white/[0.035] p-5 backdrop-blur-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25">
+                    CAPTIFY SYSTEM
+                  </span>
+
+                  <span className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-[0.15em] text-[#F7D002]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#F7D002] shadow-[0_0_12px_#F7D002]" />
+                    Online
+                  </span>
+                </div>
+
+                <div className="mt-6 space-y-3">
+                  <MiniStat
+                    label="Speech intelligence"
+                    value="AI"
+                  />
+
+                  <MiniStat
+                    label="Caption languages"
+                    value="EN · HI · HING"
+                  />
+
+                  <MiniStat
+                    label="Clip generation"
+                    value="1 — 7"
+                  />
+                </div>
               </div>
             </div>
           </div>
         </section>
 
         {/* Studio */}
-        <section id="studio" className="scroll-mt-28">
-          <div className="grid gap-5 lg:grid-cols-[1.45fr_.75fr]">
-            {/* Main studio card */}
-            <div className="relative overflow-hidden rounded-[34px] border border-white/[0.10] bg-white/[0.045] shadow-[0_35px_120px_rgba(0,0,0,.42)] backdrop-blur-3xl">
-              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(125deg,rgba(255,255,255,.08),transparent_22%,transparent_75%,rgba(247,208,2,.035))]" />
+        <section
+          id="studio"
+          className="scroll-mt-28"
+        >
+          <div className="grid gap-5 lg:grid-cols-[1.42fr_.68fr]">
+            {/* Main studio */}
+            <div className="relative overflow-hidden rounded-[36px] border border-white/[0.10] bg-white/[0.045] shadow-[0_40px_130px_rgba(0,0,0,.48)] backdrop-blur-3xl">
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(125deg,rgba(255,255,255,.075),transparent_24%,transparent_72%,rgba(247,208,2,.035))]" />
 
-              <div className="relative p-5 sm:p-7 lg:p-8">
-                <div className="mb-7 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative p-5 sm:p-7 lg:p-9">
+                {/* Studio header */}
+                <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#F7D002]/10 text-[#F7D002]">
-                        <Icon name="spark" size={16} />
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#F7D002]/20 bg-[#F7D002]/[0.08] text-[#F7D002]">
+                        <Icon
+                          name="spark"
+                          size={17}
+                        />
                       </div>
 
-                      <span className="text-xs font-black uppercase tracking-[0.2em] text-white/50">
-                        Studio
+                      <span className="text-[10px] font-black uppercase tracking-[0.24em] text-white/40">
+                        Creation studio
                       </span>
                     </div>
 
-                    <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
+                    <h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">
                       Start with your media
                     </h2>
 
-                    <p className="mt-1 text-sm text-white/40">
-                      MP3, WAV, MP4 or MKV · up to 3 GB
+                    <p className="mt-1.5 text-sm text-white/35">
+                      MP3, WAV, MP4 or MKV · maximum 3 GB
                     </p>
                   </div>
 
-                  <div className="flex w-fit items-center gap-2 rounded-full border border-white/[0.08] bg-black/20 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.15em] text-white/35">
-                    <Icon name="shield" size={13} />
-                    Private processing
+                  <div className="flex w-fit items-center gap-2 rounded-full border border-white/[0.08] bg-black/20 px-3.5 py-2.5 text-[9px] font-black uppercase tracking-[0.16em] text-white/30">
+                    <Icon
+                      name="shield"
+                      size={13}
+                    />
+                    Secure workflow
                   </div>
                 </div>
 
@@ -814,18 +968,27 @@ export default function Home() {
                       setIsDragging(false);
                     }}
                     onDrop={handleDrop}
-                    onClick={() => inputRef.current?.click()}
-                    className={`group relative flex min-h-[320px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[28px] border border-dashed px-6 text-center transition duration-300 ${
+                    onClick={() =>
+                      inputRef.current?.click()
+                    }
+                    className={`group relative flex min-h-[330px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[30px] border border-dashed px-6 text-center transition duration-500 ${
                       isDragging
                         ? "scale-[1.01] border-[#F7D002]/70 bg-[#F7D002]/[0.08]"
-                        : "border-white/[0.13] bg-black/[0.16] hover:border-[#F7D002]/40 hover:bg-white/[0.035]"
+                        : "border-white/[0.13] bg-black/[0.18] hover:border-[#F7D002]/35 hover:bg-white/[0.025]"
                     }`}
                   >
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(247,208,2,.09),transparent_38%)] opacity-70 transition group-hover:opacity-100" />
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(247,208,2,.10),transparent_40%)] opacity-70 transition duration-500 group-hover:opacity-100" />
 
-                    <div className="relative mb-7 flex h-20 w-20 items-center justify-center rounded-[26px] border border-white/[0.10] bg-white/[0.055] text-[#F7D002] shadow-[0_20px_70px_rgba(0,0,0,.35)] backdrop-blur-xl transition duration-300 group-hover:-translate-y-1 group-hover:border-[#F7D002]/30">
-                      <div className="absolute inset-2 rounded-[20px] border border-[#F7D002]/10" />
-                      <Icon name="upload" size={30} />
+                    <div className="absolute left-8 top-8 h-2 w-2 rounded-full bg-white/20" />
+                    <div className="absolute right-10 top-12 h-1.5 w-1.5 rounded-full bg-[#F7D002]/60" />
+                    <div className="absolute bottom-10 left-16 h-1.5 w-1.5 rounded-full bg-[#F00699]/50" />
+
+                    <div className="relative mb-7 flex h-20 w-20 items-center justify-center rounded-[27px] border border-white/[0.10] bg-white/[0.055] text-[#F7D002] shadow-[0_20px_70px_rgba(0,0,0,.4)] backdrop-blur-xl transition duration-500 group-hover:-translate-y-1 group-hover:scale-105 group-hover:border-[#F7D002]/30">
+                      <div className="absolute inset-2 rounded-[21px] border border-[#F7D002]/10" />
+                      <Icon
+                        name="upload"
+                        size={30}
+                      />
                     </div>
 
                     <div className="relative">
@@ -833,15 +996,20 @@ export default function Home() {
                         Drop your video or audio here
                       </h3>
 
-                      <p className="mt-2 text-sm text-white/40">
+                      <p className="mt-2 text-sm text-white/35">
                         or click anywhere to browse your device
                       </p>
 
                       <div className="mt-6 flex flex-wrap justify-center gap-2">
-                        {["MP4", "MKV", "MP3", "WAV"].map((format) => (
+                        {[
+                          "MP4",
+                          "MKV",
+                          "MP3",
+                          "WAV",
+                        ].map((format) => (
                           <span
                             key={format}
-                            className="rounded-full border border-white/[0.08] bg-white/[0.035] px-3 py-1.5 text-[10px] font-bold tracking-[0.14em] text-white/35"
+                            className="rounded-full border border-white/[0.08] bg-white/[0.035] px-3 py-1.5 text-[9px] font-black tracking-[0.16em] text-white/35"
                           >
                             {format}
                           </span>
@@ -858,11 +1026,14 @@ export default function Home() {
                     />
                   </div>
                 ) : (
-                  <div className="rounded-[28px] border border-white/[0.10] bg-black/[0.20] p-5">
+                  <div className="rounded-[30px] border border-white/[0.10] bg-black/[0.20] p-5">
                     <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-                      <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-[#F7D002]/20 bg-[#F7D002]/[0.07] text-[#F7D002]">
-                        <div className="absolute inset-0 bg-[radial-gradient(circle,rgba(247,208,2,.16),transparent_65%)]" />
-                        <Icon name="film" size={30} />
+                      <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-[22px] border border-[#F7D002]/20 bg-[#F7D002]/[0.07] text-[#F7D002]">
+                        <div className="absolute inset-0 bg-[radial-gradient(circle,rgba(247,208,2,.18),transparent_65%)]" />
+                        <Icon
+                          name="film"
+                          size={30}
+                        />
                       </div>
 
                       <div className="min-w-0 flex-1">
@@ -873,41 +1044,69 @@ export default function Home() {
                             </h3>
 
                             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-white/35">
-                              <span>{formatFileSize(file.size)}</span>
-                              <span>•</span>
                               <span>
-                                {getExtension(file.name).toUpperCase()}
+                                {formatFileSize(
+                                  file.size
+                                )}
                               </span>
+
                               <span>•</span>
-                              <span>Ready for AI</span>
+
+                              <span>
+                                {getExtension(
+                                  file.name
+                                ).toUpperCase()}
+                              </span>
+
+                              <span>•</span>
+
+                              <span className="text-[#F7D002]/70">
+                                Ready for AI
+                              </span>
                             </div>
                           </div>
 
-                          {!isProcessing && !isDone && (
-                            <button
-                              type="button"
-                              onClick={removeFile}
-                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.035] text-white/35 transition hover:border-white/20 hover:text-white"
-                              aria-label="Remove file"
-                            >
-                              <Icon name="close" size={15} />
-                            </button>
-                          )}
+                          {!isProcessing &&
+                            !isDone && (
+                              <button
+                                type="button"
+                                onClick={
+                                  removeFile
+                                }
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.035] text-white/35 transition hover:border-white/20 hover:text-white"
+                                aria-label="Remove file"
+                              >
+                                <Icon
+                                  name="close"
+                                  size={15}
+                                />
+                              </button>
+                            )}
                         </div>
 
                         {uploadProgress > 0 &&
-                          uploadProgress < 100 &&
+                          uploadProgress <
+                            100 &&
                           !isProcessing && (
                             <div className="mt-4">
-                              <div className="mb-2 flex justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-white/30">
-                                <span>Uploading</span>
-                                <span>{uploadProgress}%</span>
+                              <div className="mb-2 flex justify-between text-[9px] font-black uppercase tracking-[0.14em] text-white/25">
+                                <span>
+                                  Uploading
+                                </span>
+                                <span>
+                                  {
+                                    uploadProgress
+                                  }
+                                  %
+                                </span>
                               </div>
 
                               <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]">
                                 <div
                                   className="h-full rounded-full bg-[#F7D002] transition-all duration-200"
-                                  style={{ width: `${uploadProgress}%` }}
+                                  style={{
+                                    width: `${uploadProgress}%`,
+                                  }}
                                 />
                               </div>
                             </div>
@@ -917,7 +1116,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Controls */}
+                {/* Primary controls */}
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   <GlassSelect
                     label="Video language"
@@ -934,85 +1133,174 @@ export default function Home() {
                     options={CAPTION_LANGUAGES}
                     disabled={isProcessing}
                   />
+                </div>
 
-                  <GlassSelect
+                {/* Clip slider */}
+                <div className="mt-3 rounded-[24px] border border-white/[0.08] bg-white/[0.025] p-5 sm:p-6">
+                  <div className="flex items-start justify-between gap-5">
                     <div>
-  <div className="mb-3 flex items-center justify-between">
-    <div>
-      <p className="text-sm font-semibold text-white">Number of clips</p>
-      <p className="mt-1 text-xs text-white/45">
-        Choose how many clips CAPTIFY should generate.
-      </p>
-    </div>
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#F7D002]/10 text-[#F7D002]">
+                          <Icon
+                            name="layers"
+                            size={14}
+                          />
+                        </span>
 
-    <div className="rounded-xl border border-[#F7D002]/25 bg-[#F7D002]/10 px-3 py-1.5">
-      <span className="text-sm font-bold text-[#F7D002]">
-        {numClips} {numClips === 1 ? "Clip" : "Clips"}
-      </span>
-    </div>
-  </div>
+                        <p className="text-sm font-bold">
+                          Number of clips
+                        </p>
+                      </div>
 
-  <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-    <input
-      type="range"
-      min={1}
-      max={7}
-      step={1}
-      value={numClips}
-      onChange={(e) => setNumClips(Number(e.target.value))}
-      className="captify-range w-full"
-    />
+                      <p className="mt-2 text-xs leading-5 text-white/30">
+                        Choose how many AI-selected clips
+                        CAPTIFY should generate.
+                      </p>
+                    </div>
 
-    <div className="mt-2 flex justify-between text-[11px] text-white/35">
-      <span>1</span>
-      <span>2</span>
-      <span>3</span>
-      <span>4</span>
-      <span>5</span>
-      <span>6</span>
-      <span>7</span>
-    </div>
-  </div>
-</div>
-                    disabled={isProcessing}
-                  />
+                    <div className="shrink-0 rounded-2xl border border-[#F7D002]/25 bg-[#F7D002]/[0.08] px-4 py-2.5 text-right">
+                      <div className="text-2xl font-black leading-none text-[#F7D002]">
+                        {numClips}
+                      </div>
 
+                      <div className="mt-1 text-[8px] font-black uppercase tracking-[0.18em] text-[#F7D002]/50">
+                        {numClips === 1
+                          ? "Clip"
+                          : "Clips"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <input
+                      type="range"
+                      min={1}
+                      max={7}
+                      step={1}
+                      value={numClips}
+                      onChange={(event) =>
+                        setNumClips(
+                          Number(
+                            event.target.value
+                          )
+                        )
+                      }
+                      disabled={isProcessing}
+                      aria-label="Number of clips"
+                      className="captify-range h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/[0.10] accent-[#F7D002] disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+
+                    <div className="mt-4 flex justify-between">
+                      {[
+                        1, 2, 3, 4, 5, 6, 7,
+                      ].map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          disabled={isProcessing}
+                          onClick={() =>
+                            setNumClips(
+                              value
+                            )
+                          }
+                          className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-black transition ${
+                            numClips === value
+                              ? "bg-[#F7D002] text-black shadow-[0_0_18px_rgba(247,208,2,.20)]"
+                              : "text-white/25 hover:bg-white/[0.06] hover:text-white/60"
+                          } disabled:cursor-not-allowed`}
+                        >
+                          {value}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-between border-t border-white/[0.06] pt-4 text-[9px] font-black uppercase tracking-[0.15em] text-white/20">
+                    <span>Minimum · 1 clip</span>
+                    <span>Maximum · 7 clips</span>
+                  </div>
+                </div>
+
+                {/* Framing */}
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <GlassSelect
                     label="Framing"
                     value={framing}
                     onChange={(value) =>
-                      setFraming(value as "fill" | "fit")
+                      setFraming(
+                        value as
+                          | "fill"
+                          | "fit"
+                      )
                     }
                     options={[
-                      { name: "Fill frame", value: "fill" },
-                      { name: "Fit frame", value: "fit" },
+                      {
+                        name: "Fill Blurred",
+                        value: "fill",
+                      },
+                      {
+                        name: "Fit frame",
+                        value: "fit",
+                      },
                     ]}
                     disabled={isProcessing}
                   />
+
+                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3.5">
+                    <div className="flex h-full items-center justify-between gap-3">
+                      <div>
+                        <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-white/25">
+                          Output
+                        </span>
+
+                        <span className="mt-1 block text-sm font-semibold text-white/65">
+                          AI captioned clips
+                        </span>
+                      </div>
+
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F00699]/10 text-[#F00699]">
+                        <Icon
+                          name="captions"
+                          size={16}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Advanced */}
-                <div className="mt-3 rounded-[22px] border border-white/[0.07] bg-black/[0.12]">
+                {/* Advanced styling */}
+                <div className="mt-3 rounded-[24px] border border-white/[0.07] bg-black/[0.12]">
                   <button
                     type="button"
-                    onClick={() => setShowAdvanced((value) => !value)}
-                    className="flex w-full items-center justify-between px-4 py-4 text-left"
+                    onClick={() =>
+                      setShowAdvanced(
+                        (value) => !value
+                      )
+                    }
+                    className="flex w-full items-center justify-between px-5 py-4 text-left"
                   >
                     <div>
                       <p className="text-sm font-semibold text-white/75">
                         Advanced styling
                       </p>
+
                       <p className="mt-0.5 text-xs text-white/30">
-                        Music, caption color and output details
+                        Music, caption color and
+                        output details
                       </p>
                     </div>
 
                     <span
-                      className={`text-white/35 transition ${
-                        showAdvanced ? "rotate-180" : ""
+                      className={`text-white/35 transition duration-300 ${
+                        showAdvanced
+                          ? "rotate-180"
+                          : ""
                       }`}
                     >
-                      <Icon name="chevron" size={17} />
+                      <Icon
+                        name="chevron"
+                        size={17}
+                      />
                     </span>
                   </button>
 
@@ -1022,13 +1310,17 @@ export default function Home() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F00699]/10 text-[#F00699]">
-                              <Icon name="music" size={17} />
+                              <Icon
+                                name="music"
+                                size={17}
+                              />
                             </div>
 
                             <div>
                               <p className="text-sm font-semibold">
                                 Background music
                               </p>
+
                               <p className="text-[11px] text-white/30">
                                 Smart audio ducking
                               </p>
@@ -1038,7 +1330,9 @@ export default function Home() {
                           <Toggle
                             enabled={bgm}
                             onChange={setBgm}
-                            disabled={isProcessing}
+                            disabled={
+                              isProcessing
+                            }
                           />
                         </div>
                       </div>
@@ -1049,39 +1343,63 @@ export default function Home() {
                             <p className="text-sm font-semibold">
                               Caption color
                             </p>
+
                             <p className="text-[11px] text-white/30">
                               Choose your accent
                             </p>
                           </div>
 
                           <div
-                            className="h-5 w-5 rounded-full border border-white/20"
-                            style={{ backgroundColor: captionColor }}
+                            className="h-5 w-5 rounded-full border border-white/20 shadow-[0_0_15px_rgba(255,255,255,.05)]"
+                            style={{
+                              backgroundColor:
+                                captionColor,
+                            }}
                           />
                         </div>
 
                         <div className="flex gap-2">
-                          {CAPTION_COLORS.map((color) => (
-                            <button
-                              key={color.value}
-                              type="button"
-                              title={color.name}
-                              disabled={isProcessing}
-                              onClick={() => setCaptionColor(color.value)}
-                              className={`relative h-7 w-7 rounded-full border transition hover:scale-110 disabled:cursor-not-allowed ${
-                                captionColor === color.value
-                                  ? "border-white ring-2 ring-white/20"
-                                  : "border-white/10"
-                              }`}
-                              style={{ backgroundColor: color.value }}
-                            >
-                              {captionColor === color.value && (
-                                <span className="absolute inset-0 flex items-center justify-center text-black">
-                                  <Icon name="check" size={13} />
-                                </span>
-                              )}
-                            </button>
-                          ))}
+                          {CAPTION_COLORS.map(
+                            (color) => (
+                              <button
+                                key={
+                                  color.value
+                                }
+                                type="button"
+                                title={
+                                  color.name
+                                }
+                                disabled={
+                                  isProcessing
+                                }
+                                onClick={() =>
+                                  setCaptionColor(
+                                    color.value
+                                  )
+                                }
+                                className={`relative h-7 w-7 rounded-full border transition hover:scale-110 disabled:cursor-not-allowed ${
+                                  captionColor ===
+                                  color.value
+                                    ? "border-white ring-2 ring-white/20"
+                                    : "border-white/10"
+                                }`}
+                                style={{
+                                  backgroundColor:
+                                    color.value,
+                                }}
+                              >
+                                {captionColor ===
+                                  color.value && (
+                                  <span className="absolute inset-0 flex items-center justify-center text-black">
+                                    <Icon
+                                      name="check"
+                                      size={13}
+                                    />
+                                  </span>
+                                )}
+                              </button>
+                            )
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1093,14 +1411,30 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={handleStart}
-                    disabled={!file || isProcessing}
-                    className="group relative mt-5 flex w-full items-center justify-center gap-3 overflow-hidden rounded-[22px] border border-[#F7D002]/30 bg-[#F7D002] px-6 py-4 text-sm font-black uppercase tracking-[0.14em] text-black shadow-[0_15px_55px_rgba(247,208,2,.12)] transition duration-300 hover:scale-[1.005] hover:shadow-[0_20px_70px_rgba(247,208,2,.2)] disabled:cursor-not-allowed disabled:opacity-30"
+                    disabled={
+                      !file || isProcessing
+                    }
+                    className="group relative mt-5 flex w-full items-center justify-center gap-3 overflow-hidden rounded-[23px] border border-[#F7D002]/30 bg-[#F7D002] px-6 py-4.5 text-sm font-black uppercase tracking-[0.16em] text-black shadow-[0_15px_55px_rgba(247,208,2,.12)] transition duration-300 hover:scale-[1.005] hover:shadow-[0_20px_75px_rgba(247,208,2,.22)] disabled:cursor-not-allowed disabled:opacity-30"
                   >
-                    <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition duration-700 group-hover:translate-x-full" />
+                    <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/35 to-transparent transition duration-700 group-hover:translate-x-full" />
 
                     <span className="relative flex items-center gap-3">
-                      <Icon name={isProcessing ? "zap" : "spark"} size={18} />
-                      {isProcessing ? "CAPTIFY IS WORKING" : "CREATE MY CLIPS"}
+                      <Icon
+                        name={
+                          isProcessing
+                            ? "zap"
+                            : "spark"
+                        }
+                        size={18}
+                      />
+
+                      {isProcessing
+                        ? "CAPTIFY IS WORKING"
+                        : `CREATE ${numClips} ${
+                            numClips === 1
+                              ? "CLIP"
+                              : "CLIPS"
+                          }`}
                     </span>
                   </button>
                 )}
@@ -1113,28 +1447,38 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Side intelligence card */}
-            <aside className="relative overflow-hidden rounded-[34px] border border-white/[0.09] bg-white/[0.035] p-6 shadow-[0_30px_100px_rgba(0,0,0,.35)] backdrop-blur-3xl lg:p-7">
-              <div className="absolute right-[-100px] top-[-100px] h-[260px] w-[260px] rounded-full bg-[#F7D002]/[0.05] blur-[80px]" />
+            {/* Intelligence card */}
+            <aside className="relative overflow-hidden rounded-[36px] border border-white/[0.09] bg-white/[0.035] p-6 shadow-[0_30px_110px_rgba(0,0,0,.38)] backdrop-blur-3xl lg:p-7">
+              <div className="absolute right-[-120px] top-[-120px] h-[300px] w-[300px] rounded-full bg-[#F7D002]/[0.06] blur-[90px]" />
 
               <div className="relative">
-                <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-2xl border border-[#F7D002]/20 bg-[#F7D002]/[0.08] text-[#F7D002]">
-                  <Icon name="wand" size={22} />
+                <div className="flex items-center justify-between">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[#F7D002]/20 bg-[#F7D002]/[0.08] text-[#F7D002]">
+                    <Icon
+                      name="wand"
+                      size={22}
+                    />
+                  </div>
+
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-white/20">
+                    AI FLOW
+                  </span>
                 </div>
 
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#F7D002]">
+                <p className="mt-8 text-[10px] font-black uppercase tracking-[0.22em] text-[#F7D002]">
                   The CAPTIFY workflow
                 </p>
 
-                <h3 className="mt-3 text-2xl font-bold leading-tight">
+                <h3 className="mt-3 text-2xl font-bold leading-tight sm:text-3xl">
                   From raw speech
                   <br />
                   to polished clips.
                 </h3>
 
                 <p className="mt-3 text-sm leading-6 text-white/35">
-                  CAPTIFY analyzes your media, finds engaging moments and
-                  builds captioned clips automatically.
+                  CAPTIFY analyzes your media, finds
+                  engaging moments and builds captioned
+                  clips automatically.
                 </p>
 
                 <div className="my-7 h-px bg-white/[0.07]" />
@@ -1175,7 +1519,7 @@ export default function Home() {
         {/* Processing */}
         {isProcessing && (
           <section className="mt-5">
-            <div className="relative overflow-hidden rounded-[32px] border border-[#F7D002]/15 bg-white/[0.035] p-6 shadow-[0_30px_100px_rgba(0,0,0,.35)] backdrop-blur-3xl sm:p-8">
+            <div className="relative overflow-hidden rounded-[34px] border border-[#F7D002]/15 bg-white/[0.035] p-6 shadow-[0_30px_100px_rgba(0,0,0,.35)] backdrop-blur-3xl sm:p-8">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_10%_50%,rgba(247,208,2,.07),transparent_35%)]" />
 
               <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center">
@@ -1183,8 +1527,12 @@ export default function Home() {
                   <div className="absolute inset-0 animate-ping rounded-full border border-[#F7D002]/10" />
                   <div className="absolute inset-2 rounded-full border border-[#F7D002]/20" />
                   <div className="absolute inset-5 rounded-full bg-[#F7D002]/10 shadow-[0_0_50px_rgba(247,208,2,.18)]" />
+
                   <div className="relative text-[#F7D002]">
-                    <Icon name="spark" size={26} />
+                    <Icon
+                      name="spark"
+                      size={26}
+                    />
                   </div>
                 </div>
 
@@ -1192,7 +1540,10 @@ export default function Home() {
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
-                        {getStatusLabel(status?.status || "queued")}
+                        {getStatusLabel(
+                          status?.status ||
+                            "queued"
+                        )}
                       </p>
 
                       <h3 className="mt-1 text-xl font-bold">
@@ -1201,24 +1552,30 @@ export default function Home() {
                     </div>
 
                     <span className="text-2xl font-black text-white/80">
-                      {Math.round(progress)}%
+                      {Math.round(
+                        progress
+                      )}
+                      %
                     </span>
                   </div>
 
                   <p className="mt-2 text-sm text-white/35">
-                    {status?.message || "Preparing your media..."}
+                    {status?.message ||
+                      "Preparing your media..."}
                   </p>
 
                   <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.07]">
                     <div
                       className="relative h-full rounded-full bg-[#F7D002] transition-all duration-700"
-                      style={{ width: `${progress}%` }}
+                      style={{
+                        width: `${progress}%`,
+                      }}
                     >
                       <span className="absolute inset-y-0 right-0 w-20 bg-gradient-to-r from-transparent to-white/50 blur-sm" />
                     </div>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-white/20">
+                  <div className="mt-3 flex items-center justify-between text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
                     <span>AI analysis</span>
                     <span>Clip rendering</span>
                     <span>Almost there</span>
@@ -1230,144 +1587,208 @@ export default function Home() {
         )}
 
         {/* Results */}
-        {isDone && status?.clips && (
-          <section className="mt-16 scroll-mt-28">
-            <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#F7D002]" />
-                  Finished
-                </div>
-
-                <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
-                  Your clips are ready.
-                </h2>
-
-                <p className="mt-2 text-sm text-white/35">
-                  {status.clips.length} AI-selected clips generated from your
-                  media.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={startOver}
-                className="flex w-fit items-center gap-2 rounded-full border border-white/[0.09] bg-white/[0.04] px-4 py-2.5 text-xs font-bold text-white/55 transition hover:border-white/20 hover:text-white"
-              >
-                <Icon name="refresh" size={14} />
-                Start over
-              </button>
-            </div>
-
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {status.clips.map((clip) => (
-                <article
-                  key={clip.index}
-                  className="group overflow-hidden rounded-[28px] border border-white/[0.09] bg-white/[0.035] shadow-[0_25px_80px_rgba(0,0,0,.3)] backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-white/[0.15]"
-                >
-                  <div className="relative aspect-video overflow-hidden bg-black">
-                    <video
-                      src={clip.editedUrl}
-                      controls
-                      preload="metadata"
-                      className="h-full w-full object-cover"
-                    />
-
-                    <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.15em] text-white/70 backdrop-blur-xl">
-                      Clip {String(clip.index).padStart(2, "0")}
-                    </div>
+        {isDone &&
+          status?.clips && (
+            <section className="mt-16 scroll-mt-28">
+              <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#F7D002] shadow-[0_0_10px_#F7D002]" />
+                    Finished
                   </div>
 
-                  <div className="p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <h3 className="truncate text-base font-bold">
-                          {clip.title}
-                        </h3>
+                  <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
+                    Your clips are ready.
+                  </h2>
 
-                        <div className="mt-2 flex items-center gap-2 text-xs text-white/30">
-                          <Icon name="clock" size={13} />
-                          {timeRange(clip.startTime, clip.endTime)}
-                          <span>•</span>
-                          {clipLength(clip.startTime, clip.endTime).toFixed(1)}
-                          s
+                  <p className="mt-2 text-sm text-white/35">
+                    {status.clips.length} AI-selected{" "}
+                    {status.clips.length === 1
+                      ? "clip"
+                      : "clips"}{" "}
+                    generated from your media.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={startOver}
+                  className="flex w-fit items-center gap-2 rounded-full border border-white/[0.09] bg-white/[0.04] px-4 py-2.5 text-xs font-bold text-white/55 transition hover:border-white/20 hover:text-white"
+                >
+                  <Icon
+                    name="refresh"
+                    size={14}
+                  />
+                  Start over
+                </button>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {status.clips.map(
+                  (clip) => (
+                    <article
+                      key={clip.index}
+                      className="group overflow-hidden rounded-[30px] border border-white/[0.09] bg-white/[0.035] shadow-[0_25px_80px_rgba(0,0,0,.3)] backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-white/[0.15]"
+                    >
+                      <div className="relative aspect-video overflow-hidden bg-black">
+                        <video
+                          src={
+                            clip.editedUrl
+                          }
+                          controls
+                          preload="metadata"
+                          className="h-full w-full object-cover"
+                        />
+
+                        <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.15em] text-white/70 backdrop-blur-xl">
+                          Clip{" "}
+                          {String(
+                            clip.index
+                          ).padStart(
+                            2,
+                            "0"
+                          )}
                         </div>
                       </div>
 
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#F7D002]/[0.08] text-[#F7D002]">
-                        <Icon name="spark" size={14} />
-                      </div>
-                    </div>
+                      <div className="p-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <h3 className="truncate text-base font-bold">
+                              {clip.title}
+                            </h3>
 
-                    {clip.hookReason && (
-                      <div className="mt-4 rounded-2xl border border-white/[0.06] bg-black/[0.16] p-3.5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/20">
-                          Why this moment
-                        </p>
+                            <div className="mt-2 flex items-center gap-2 text-xs text-white/30">
+                              <Icon
+                                name="clock"
+                                size={13}
+                              />
 
-                        <p className="mt-1.5 text-xs leading-5 text-white/45">
-                          {clip.hookReason}
-                        </p>
-                      </div>
-                    )}
+                              {timeRange(
+                                clip.startTime,
+                                clip.endTime
+                              )}
 
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <a
-                        href={clip.editedUrl}
-                        download
-                        className="flex items-center justify-center gap-2 rounded-xl bg-[#F7D002] px-3 py-3 text-xs font-black uppercase tracking-[0.08em] text-black transition hover:brightness-105"
-                      >
-                        <Icon name="download" size={14} />
-                        Download
-                      </a>
+                              <span>
+                                •
+                              </span>
 
-                      <button
-                        type="button"
-                        onClick={() => copyTimestamps(clip)}
-                        className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-3 text-xs font-bold text-white/50 transition hover:border-white/15 hover:text-white"
-                      >
-                        {copied === clip.index ? (
-                          <>
-                            <Icon name="check" size={14} />
-                            Copied
-                          </>
-                        ) : (
-                          <>
-                            <Icon name="copy" size={14} />
-                            Timestamp
-                          </>
+                              {clipLength(
+                                clip.startTime,
+                                clip.endTime
+                              ).toFixed(1)}
+                              s
+                            </div>
+                          </div>
+
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#F7D002]/[0.08] text-[#F7D002]">
+                            <Icon
+                              name="spark"
+                              size={14}
+                            />
+                          </div>
+                        </div>
+
+                        {clip.hookReason && (
+                          <div className="mt-4 rounded-2xl border border-white/[0.06] bg-black/[0.16] p-3.5">
+                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/20">
+                              Why this moment
+                            </p>
+
+                            <p className="mt-1.5 text-xs leading-5 text-white/45">
+                              {
+                                clip.hookReason
+                              }
+                            </p>
+                          </div>
                         )}
-                      </button>
-                    </div>
 
-                    {clip.rawUrl && (
-                      <a
-                        href={clip.rawUrl}
-                        download
-                        className="mt-3 flex items-center justify-center gap-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/20 transition hover:text-white/50"
-                      >
-                        Download raw clip
-                        <Icon name="arrow" size={12} />
-                      </a>
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                          <a
+                            href={
+                              clip.editedUrl
+                            }
+                            download
+                            className="flex items-center justify-center gap-2 rounded-xl bg-[#F7D002] px-3 py-3 text-xs font-black uppercase tracking-[0.08em] text-black transition hover:brightness-105"
+                          >
+                            <Icon
+                              name="download"
+                              size={14}
+                            />
+                            Download
+                          </a>
 
-        {/* Error result */}
-        {status?.status === "error" && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyTimestamps(
+                                clip
+                              )
+                            }
+                            className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-3 text-xs font-bold text-white/50 transition hover:border-white/15 hover:text-white"
+                          >
+                            {copied ===
+                            clip.index ? (
+                              <>
+                                <Icon
+                                  name="check"
+                                  size={14}
+                                />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Icon
+                                  name="copy"
+                                  size={14}
+                                />
+                                Timestamp
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {clip.rawUrl && (
+                          <a
+                            href={
+                              clip.rawUrl
+                            }
+                            download
+                            className="mt-3 flex items-center justify-center gap-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/20 transition hover:text-white/50"
+                          >
+                            Download raw clip
+                            <Icon
+                              name="arrow"
+                              size={12}
+                            />
+                          </a>
+                        )}
+                      </div>
+                    </article>
+                  )
+                )}
+              </div>
+            </section>
+          )}
+
+        {/* Error */}
+        {status?.status ===
+          "error" && (
           <section className="mt-5">
-            <div className="rounded-[28px] border border-red-400/15 bg-red-400/[0.05] p-6">
+            <div className="rounded-[30px] border border-red-400/15 bg-red-400/[0.05] p-6">
               <div className="flex items-start gap-4">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-400/10 text-red-300">
-                  <Icon name="close" size={18} />
+                  <Icon
+                    name="close"
+                    size={18}
+                  />
                 </div>
 
                 <div>
-                  <h3 className="font-bold">Processing stopped</h3>
+                  <h3 className="font-bold">
+                    Processing stopped
+                  </h3>
+
                   <p className="mt-1 text-sm leading-6 text-red-100/50">
                     {status.error ||
                       status.message ||
@@ -1392,20 +1813,24 @@ export default function Home() {
           id="how-it-works"
           className="mt-28 scroll-mt-28 border-t border-white/[0.07] pt-16"
         >
-          <div className="max-w-2xl">
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#F7D002]">
-              How it works
-            </p>
+          <div className="grid gap-8 lg:grid-cols-[.8fr_1.2fr] lg:items-end">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#F7D002]">
+                How it works
+              </p>
 
-            <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">
-              One upload.
-              <br />
-              Multiple polished moments.
-            </h2>
+              <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">
+                One upload.
+                <br />
+                Multiple polished moments.
+              </h2>
+            </div>
 
-            <p className="mt-4 text-sm leading-6 text-white/35 sm:text-base">
-              CAPTIFY handles the repetitive work so you can focus on the
-              content.
+            <p className="max-w-xl text-sm leading-6 text-white/35 sm:text-base">
+              CAPTIFY handles the repetitive work so
+              you can focus on the content. Upload,
+              choose your preferences and let the
+              processing pipeline handle the rest.
             </p>
           </div>
 
@@ -1435,11 +1860,12 @@ export default function Home() {
 
         {/* Footer */}
         <footer className="mt-24 border-t border-white/[0.07] pt-8">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-black uppercase tracking-[0.2em]">
                 CAPTIFY
               </p>
+
               <p className="mt-1 text-xs text-white/25">
                 Your videos. Captions, perfected.
               </p>
@@ -1452,20 +1878,28 @@ export default function Home() {
               >
                 About
               </a>
+
               <a
                 href="#how-it-works"
                 className="transition hover:text-white"
               >
                 How it works
               </a>
+
               <a
                 href="/support"
                 className="transition hover:text-white"
               >
                 Support
               </a>
-              <span className="text-white/10">|</span>
-              <span>MADE BY SHIVRAJ KUMAR</span>
+
+              <span className="text-white/10">
+                |
+              </span>
+
+              <span className="font-semibold tracking-wide">
+                MADE BY SHIVRAJ KUMAR
+              </span>
             </div>
           </div>
         </footer>
@@ -1484,7 +1918,10 @@ function GlassSelect({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  options: { name: string; value: string }[];
+  options: {
+    name: string;
+    value: string;
+  }[];
   disabled?: boolean;
 }) {
   return (
@@ -1496,23 +1933,30 @@ function GlassSelect({
       <div className="relative">
         <select
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) =>
+            onChange(event.target.value)
+          }
           disabled={disabled}
           className="w-full appearance-none rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 pr-10 text-sm font-semibold text-white/75 outline-none transition hover:border-white/[0.14] focus:border-[#F7D002]/30 focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {options.map((option) => (
-            <option
-              key={option.value}
-              value={option.value}
-              className="bg-[#111111] text-white"
-            >
-              {option.name}
-            </option>
-          ))}
+          {options.map(
+            (option) => (
+              <option
+                key={option.value}
+                value={option.value}
+                className="bg-[#111111] text-white"
+              >
+                {option.name}
+              </option>
+            )
+          )}
         </select>
 
         <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/25">
-          <Icon name="chevron" size={15} />
+          <Icon
+            name="chevron"
+            size={15}
+          />
         </span>
       </div>
     </label>
@@ -1534,7 +1978,9 @@ function Toggle({
       role="switch"
       aria-checked={enabled}
       disabled={disabled}
-      onClick={() => onChange(!enabled)}
+      onClick={() =>
+        onChange(!enabled)
+      }
       className={`relative h-7 w-12 shrink-0 rounded-full border transition ${
         enabled
           ? "border-[#F7D002]/30 bg-[#F7D002]/20"
@@ -1576,7 +2022,10 @@ function WorkflowStep({
       )}
 
       <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.035] text-[#F7D002]">
-        <Icon name={icon} size={15} />
+        <Icon
+          name={icon}
+          size={15}
+        />
       </div>
 
       <div className="pb-6">
@@ -1584,7 +2033,10 @@ function WorkflowStep({
           <span className="text-[9px] font-black tracking-[0.12em] text-white/20">
             {number}
           </span>
-          <h4 className="text-sm font-bold">{title}</h4>
+
+          <h4 className="text-sm font-bold">
+            {title}
+          </h4>
         </div>
 
         <p className="mt-1 text-xs leading-5 text-white/30">
@@ -1601,19 +2053,25 @@ function FeatureCard({
   title,
   description,
 }: {
-  icon: "layers" | "spark" | "captions";
+  icon:
+    | "layers"
+    | "spark"
+    | "captions";
   number: string;
   title: string;
   description: string;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-[28px] border border-white/[0.08] bg-white/[0.035] p-6 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-white/[0.14]">
+    <div className="group relative overflow-hidden rounded-[30px] border border-white/[0.08] bg-white/[0.035] p-6 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-white/[0.14]">
       <div className="absolute right-[-60px] top-[-60px] h-40 w-40 rounded-full bg-[#F7D002]/[0.04] blur-3xl transition group-hover:bg-[#F7D002]/[0.07]" />
 
       <div className="relative">
         <div className="flex items-center justify-between">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#F7D002]/15 bg-[#F7D002]/[0.07] text-[#F7D002]">
-            <Icon name={icon} size={19} />
+            <Icon
+              name={icon}
+              size={19}
+            />
           </div>
 
           <span className="text-[10px] font-black tracking-[0.2em] text-white/15">
@@ -1621,12 +2079,34 @@ function FeatureCard({
           </span>
         </div>
 
-        <h3 className="mt-7 text-xl font-bold">{title}</h3>
+        <h3 className="mt-7 text-xl font-bold">
+          {title}
+        </h3>
 
         <p className="mt-2 text-sm leading-6 text-white/35">
           {description}
         </p>
       </div>
+    </div>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5">
+      <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-white/25">
+        {label}
+      </span>
+
+      <span className="text-[9px] font-black tracking-[0.12em] text-white/60">
+        {value}
+      </span>
     </div>
   );
 }
