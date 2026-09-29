@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const updated = setJobStatus(
+    const updated = await setJobStatus(
       patch.jobId,
       patch
     );
@@ -37,6 +37,9 @@ export async function POST(req: NextRequest) {
       await updateProjectStatus({
         jobId: patch.jobId,
         status: patch.status,
+        progress: patch.progress,
+        message: patch.message,
+        error: patch.error,
         clips: patch.clips,
       });
     }
