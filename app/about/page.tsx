@@ -57,7 +57,7 @@ function Icon({
 
 export default function AboutPage() {
   useEffect(() => {
-    document.title = "About — CAPTIFY";
+    document.title = "About — CAPTIFYY";
   }, []);
 
   return (
@@ -91,7 +91,7 @@ export default function AboutPage() {
 
             <div>
               <div className="text-sm font-black uppercase tracking-[0.24em]">
-                CAPTIFY
+                CAPTIFYY
               </div>
 
               <div className="hidden text-[8px] font-semibold uppercase tracking-[0.28em] text-white/30 sm:block">
@@ -162,7 +162,7 @@ export default function AboutPage() {
           <div className="relative mt-6 flex items-center justify-center gap-3 text-sm font-bold text-white/30">
             <span>👑</span>
             <span className="uppercase tracking-[0.28em]">
-              Founder · Creator · CAPTIFY
+              Founder · Creator · CAPTIFYY
             </span>
             <span>🦸‍♂️</span>
           </div>
@@ -176,7 +176,7 @@ export default function AboutPage() {
         <section className="max-w-4xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#F7D002]/15 bg-[#F7D002]/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#F7D002]">
             <Icon name="spark" size={13} />
-            About CAPTIFY
+            About CAPTIFYY
           </div>
 
           <h2 className="mt-7 text-5xl font-black tracking-[-0.04em] sm:text-7xl">
@@ -185,7 +185,7 @@ export default function AboutPage() {
           </h2>
 
           <p className="mt-7 max-w-2xl text-base leading-7 text-white/40 sm:text-lg">
-            CAPTIFY is an AI-powered caption and clip studio built to remove
+            CAPTIFYY is an AI-powered caption and clip studio built to remove
             the repetitive editing work between an uploaded video and polished,
             ready-to-use clips.
           </p>
@@ -282,7 +282,7 @@ export default function AboutPage() {
         </div>
 
         <footer className="mt-24 border-t border-white/[0.07] pt-7 text-xs text-white/25">
-          CAPTIFY · Your videos. Captions, perfected. · MADE BY SHIVRAJ KUMAR
+          CAPTIFYY · Your videos. Captions, perfected. · MADE BY SHIVRAJ KUMAR
         </footer>
       </div>
     </main>
