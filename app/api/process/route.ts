@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { setJobStatus } from "@/lib/jobStore";
 import { updateProjectOptions } from "@/lib/history";
-import { issueSignedToken, presignUrl } from "@vercel/blob";
 
 export const runtime = "nodejs";
 
@@ -43,22 +42,6 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    const sourcePathname = new URL(sourceUrl).pathname.replace(/^\\/+/, "");
-
-    const signedToken = await issueSignedToken({
-      pathname: sourcePathname,
-      operations: ["get"],
-    });
-
-    const { presignedUrl: workerSourceUrl } = await presignUrl(
-      signedToken,
-      {
-        pathname: sourcePathname,
-        operation: "get",
-        validUntil: Date.now() + 60 * 60 * 1000,
-      }
-    );
 
     const safeOptions = options || {};
 
