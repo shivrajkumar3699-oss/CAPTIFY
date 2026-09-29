@@ -30,6 +30,10 @@ export function ensureHistorySchema() {
       `;
 
       await sql`
+        ALTER TABLE captify_projects ADD COLUMN IF NOT EXISTS progress INTEGER NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS message TEXT, ADD COLUMN IF NOT EXISTS error TEXT
+      `;
+
+      await sql`
         CREATE TABLE IF NOT EXISTS captify_clips (
           id BIGSERIAL PRIMARY KEY,
           project_id BIGINT NOT NULL
