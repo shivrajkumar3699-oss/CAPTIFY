@@ -73,9 +73,9 @@ function checkSecret(req, res, next) {
 // Push status back to Next.js
 // ------------------------------------------------------------
 
-async function pushStatus(jobId, statusUpdate) {
+async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
   try {
-    if (!NEXT_APP_URL) {
+    if (!statusBaseUrl) {
       console.error(
         `[${jobId}] NEXT_APP_URL is not configured`
       );
@@ -83,7 +83,7 @@ async function pushStatus(jobId, statusUpdate) {
     }
 
     await fetch(
-      `${NEXT_APP_URL.replace(/\/+$/, "")}/api/internal/status`,
+      `${statusBaseUrl.replace(/\/+$/, "")}/api/internal/status`,
       {
         method: "POST",
         headers: {
@@ -185,6 +185,7 @@ app.post("/process", checkSecret, (req, res) => {
     ext,
     sourceUrl,
     options,
+    statusUrl,
   } = req.body || {};
 
   if (!jobId || !ext || !sourceUrl) {
@@ -235,7 +236,8 @@ app.post("/process", checkSecret, (req, res) => {
     cleanJobId,
     cleanExt,
     sourceUrl,
-    options || {}
+    options || {},
+    typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl) ? statusUrl : NEXT_APP_URL
   ).catch(async (err) => {
     console.error(
       `[${cleanJobId}] Pipeline crashed:`,
@@ -263,7 +265,8 @@ async function runPipeline(
   jobId,
   ext,
   sourceUrl,
-  options
+  options,
+  statusBaseUrl = NEXT_APP_URL
 ) {
   if (!STORAGE_DIR) {
     throw new Error(
@@ -337,6 +340,7 @@ async function runPipeline(
     "same";
 
   const usedBgmFiles = new Set();
+  const reportStatus = (update) => pushStatus(jobId, update, statusBaseUrl);
 
   try {
     // ----------------------------------------------------------
@@ -403,7 +407,7 @@ async function runPipeline(
     // Step 1: Extract audio
     // ----------------------------------------------------------
 
-    await pushStatus(jobId, {
+    await reportStatus({
       status: "transcribing",
       progress: 5,
       message: "Extracting audio",
@@ -423,7 +427,7 @@ async function runPipeline(
     // Step 2: Transcribe
     // ----------------------------------------------------------
 
-    await pushStatus(jobId, {
+    await reportStatus({
       status: "transcribing",
       progress: 20,
       message: "Transcribing audio",
@@ -474,7 +478,7 @@ async function runPipeline(
     if (
       captionLanguage !== "same"
     ) {
-      await pushStatus(jobId, {
+      await reportStatus({
         status: "transcribing",
         progress: 30,
         message:
@@ -524,7 +528,7 @@ async function runPipeline(
     // Step 4: Hook detection
     // ----------------------------------------------------------
 
-    await pushStatus(jobId, {
+    await reportStatus({
       status: "detecting_hooks",
       progress: 40,
       message:
@@ -586,7 +590,7 @@ async function runPipeline(
           (i / total) * 50
         );
 
-      await pushStatus(jobId, {
+      await reportStatus({
         status: "rendering",
         progress: baseProgress,
         message:
@@ -705,7 +709,7 @@ async function runPipeline(
       });
 
       // Give frontend a little more precise progress.
-      await pushStatus(jobId, {
+      await reportStatus({
         status: "rendering",
         progress:
           45 +
@@ -740,7 +744,7 @@ async function runPipeline(
     // Step 7: Done
     // ----------------------------------------------------------
 
-    await pushStatus(jobId, {
+    await reportStatus({
       status: "done",
       progress: 100,
       message:
