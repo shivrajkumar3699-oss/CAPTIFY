@@ -627,7 +627,7 @@ export default function Home() {
         status: "queued",
         progress: 0,
         message:
-          "Job queued, waiting for CAPTIFY AI...",
+          "Job queued, waiting for CAPTIFYY AI...",
       });
 
       startPolling(newJobId);
@@ -768,7 +768,7 @@ export default function Home() {
 
             <div>
               <div className="text-sm font-black uppercase tracking-[0.24em]">
-                CAPTIFY
+                CAPTIFYY
               </div>
 
               <div className="hidden text-[8px] font-semibold uppercase tracking-[0.28em] text-white/30 sm:block">
@@ -857,7 +857,7 @@ export default function Home() {
               <div className="mt-8 flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-end">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.28em] text-[#F7D002]">
-                    CAPTIFY · AI CAPTION STUDIO
+                    CAPTIFYY · AI CAPTION STUDIO
                   </p>
 
                   <p className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-3xl">
@@ -877,7 +877,7 @@ export default function Home() {
               <div className="ml-auto max-w-[310px] rounded-[28px] border border-white/[0.08] bg-white/[0.035] p-5 backdrop-blur-2xl">
                 <div className="flex items-center justify-between">
                   <span className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25">
-                    CAPTIFY SYSTEM
+                    CAPTIFYY SYSTEM
                   </span>
 
                   <span className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-[0.15em] text-[#F7D002]">
@@ -1154,7 +1154,7 @@ export default function Home() {
 
                       <p className="mt-2 text-xs leading-5 text-white/30">
                         Choose how many AI-selected clips
-                        CAPTIFY should generate.
+                        CAPTIFYY should generate.
                       </p>
                     </div>
 
@@ -1429,7 +1429,7 @@ export default function Home() {
                       />
 
                       {isProcessing
-                        ? "CAPTIFY IS WORKING"
+                        ? "CAPTIFYY IS WORKING"
                         : `CREATE ${numClips} ${
                             numClips === 1
                               ? "CLIP"
@@ -1466,7 +1466,7 @@ export default function Home() {
                 </div>
 
                 <p className="mt-8 text-[10px] font-black uppercase tracking-[0.22em] text-[#F7D002]">
-                  The CAPTIFY workflow
+                  The CAPTIFYY workflow
                 </p>
 
                 <h3 className="mt-3 text-2xl font-bold leading-tight sm:text-3xl">
@@ -1476,7 +1476,7 @@ export default function Home() {
                 </h3>
 
                 <p className="mt-3 text-sm leading-6 text-white/35">
-                  CAPTIFY analyzes your media, finds
+                  CAPTIFYY analyzes your media, finds
                   engaging moments and builds captioned
                   clips automatically.
                 </p>
@@ -1487,7 +1487,7 @@ export default function Home() {
                   number="01"
                   icon="upload"
                   title="Upload"
-                  description="Give CAPTIFY your video or audio."
+                  description="Give CAPTIFYY your video or audio."
                 />
 
                 <WorkflowStep
@@ -1547,7 +1547,7 @@ export default function Home() {
                       </p>
 
                       <h3 className="mt-1 text-xl font-bold">
-                        CAPTIFY is creating your clips
+                        CAPTIFYY is creating your clips
                       </h3>
                     </div>
 
@@ -1792,7 +1792,7 @@ export default function Home() {
                   <p className="mt-1 text-sm leading-6 text-red-100/50">
                     {status.error ||
                       status.message ||
-                      "CAPTIFY could not finish this job."}
+                      "CAPTIFYY could not finish this job."}
                   </p>
 
                   <button
@@ -1827,7 +1827,7 @@ export default function Home() {
             </div>
 
             <p className="max-w-xl text-sm leading-6 text-white/35 sm:text-base">
-              CAPTIFY handles the repetitive work so
+              CAPTIFYY handles the repetitive work so
               you can focus on the content. Upload,
               choose your preferences and let the
               processing pipeline handle the rest.
@@ -1846,7 +1846,7 @@ export default function Home() {
               icon="spark"
               number="02"
               title="Discover"
-              description="CAPTIFY looks for moments that can work as engaging short-form clips."
+              description="CAPTIFYY looks for moments that can work as engaging short-form clips."
             />
 
             <FeatureCard
@@ -1863,7 +1863,7 @@ export default function Home() {
           <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-black uppercase tracking-[0.2em]">
-                CAPTIFY
+                CAPTIFYY
               </p>
 
               <p className="mt-1 text-xs text-white/25">
