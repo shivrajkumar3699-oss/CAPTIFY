@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { createB2PresignedUrl } from "@/lib/b2";
 import { setJobStatus } from "@/lib/jobStore";
 
 export const runtime = "nodejs";
@@ -13,29 +12,26 @@ export async function POST(req: NextRequest) {
     const { jobId, ext, sourcePathname, options } = await req.json();
     if (!jobId || !ext || !sourcePathname) return NextResponse.json({ error: "jobId, ext, and sourcePathname are required" }, { status: 400 });
 
-    if (typeof sourcePathname !== "string" || !/^uploads\/[a-zA-Z0-9_-]+\/source\.(mp3|wav|mp4|mkv)$/i.test(sourcePathname))
+    if (typeof sourcePathname !== "string" || !/^uploads\/[a-zA-Z0-9_-]+\/source\.(mp3|wav|mp4|mkv)$/i.test(sourcePathname)) {
       return NextResponse.json({ error: "Invalid sourcePathname." }, { status: 400 });
+    }
 
-    const workerSourceUrl = createB2PresignedUrl("GET", sourcePathname, 60 * 60);
-    const sourceDeleteUrl = createB2PresignedUrl("DELETE", sourcePathname, 60 * 60);
-
-    const safeOptions = options || {};
     await setJobStatus(jobId, { status: "queued", progress: 0, message: "Job queued, waiting for worker to pick it up" });
 
     const workerUrl = process.env.WORKER_URL;
-    if (!workerUrl) return NextResponse.json({ error: "WORKER_URL is not configured." }, { status: 500 });
+    const workerSecret = process.env.WORKER_SECRET;
+    if (!workerUrl || !workerSecret) return NextResponse.json({ error: "Worker configuration is missing." }, { status: 500 });
 
     const statusUrl = req.nextUrl.origin.replace(/\/+$/, "") + "/api/internal/status";
-
     const workerResponse = await fetch(workerUrl.replace(/\/+$/, "") + "/process", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-worker-secret": process.env.WORKER_SECRET || "" },
-      body: JSON.stringify({ jobId, ext, sourceUrl: workerSourceUrl, sourceDeleteUrl, options: safeOptions, statusUrl }),
+      headers: { "Content-Type": "application/json", "x-worker-secret": workerSecret },
+      body: JSON.stringify({ jobId, ext, sourcePath: sourcePathname, options: options || {}, statusUrl }),
     });
 
     if (!workerResponse.ok) {
       const workerText = await workerResponse.text().catch(() => "");
-      await setJobStatus(jobId, { status: "error", progress: 0, message: "Worker could not start the job", error: workerText || ("Worker returned HTTP " + workerResponse.status) });
+      await setJobStatus(jobId, { status: "error", progress: 0, message: "Worker could not start the job", error: workerText || "Worker returned HTTP " + workerResponse.status });
       return NextResponse.json({ error: "Worker could not start the processing job." }, { status: 502 });
     }
 
