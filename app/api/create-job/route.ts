@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { v4 as uuid } from "uuid";
-import { setJobStatus } from "@/lib/jobStore";
+import { createJob } from "@/lib/jobStore";
 
 export const runtime = "nodejs";
 
@@ -18,11 +18,7 @@ export async function POST() {
 
     const jobId = uuid();
 
-    await setJobStatus(jobId, {
-      status: "queued",
-      progress: 0,
-      message: "Job created. Waiting for upload.",
-    });
+    await createJob({ userId, jobId });
 
     return NextResponse.json(
       { ok: true, jobId, status: "queued" },
