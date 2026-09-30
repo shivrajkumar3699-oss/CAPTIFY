@@ -414,9 +414,14 @@ export default function Home() {
     );
   }, [isProcessing, isDone, status?.progress, uploadProgress]);
 
+  const pollingCancelRef = useRef<(() => void) | null>(null);
+
   const stopPolling = useCallback(() => {
+    pollingCancelRef.current?.();
+    pollingCancelRef.current = null;
+
     if (pollingRef.current) {
-      clearInterval(pollingRef.current);
+      clearTimeout(pollingRef.current as unknown as ReturnType<typeof setTimeout>);
       pollingRef.current = null;
     }
   }, []);
@@ -460,11 +465,26 @@ export default function Home() {
     (id: string) => {
       stopPolling();
 
-      fetchStatus(id);
+      let cancelled = false;
 
-      pollingRef.current = setInterval(() => {
-        fetchStatus(id);
-      }, 2500);
+      const poll = async () => {
+        if (cancelled) return;
+
+        await fetchStatus(id);
+
+        if (cancelled) return;
+
+        // Wait until the previous request has fully completed before making
+        // another request. This prevents out-of-order responses from an
+        // older 41% status overwriting a newer 100%/done status.
+        pollingRef.current = setTimeout(poll, 2500);
+      };
+
+      poll();
+
+      pollingCancelRef.current = () => {
+        cancelled = true;
+      };
     },
     [fetchStatus, stopPolling]
   );
@@ -523,12 +543,23 @@ export default function Home() {
     try {
       const extension = getExtension(file.name);
 
-      const createResponse = await fetch(
+      // Create the job ID in the browser so the direct Render upload can
+      // start immediately. The database job creation runs in parallel.
+      const newJobId = crypto.randomUUID();
+      setJobId(newJobId);
+
+      const createResponsePromise = fetch(
         "/api/create-job",
         {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ jobId: newJobId }),
         }
       );
+
+      const createResponse = await createResponsePromise;
 
       if (!createResponse.ok) {
         let message = "Could not create the processing job.";
@@ -552,10 +583,12 @@ export default function Home() {
       const createData =
         await createResponse.json();
 
-      const newJobId =
+      const confirmedJobId =
         createData.jobId as string;
 
-      setJobId(newJobId);
+      if (confirmedJobId !== newJobId) {
+        throw new Error("Job ID mismatch. Please try again.");
+      }
 
       const uploadUrlBase =
       typeof createData.uploadUrlBase === "string"
