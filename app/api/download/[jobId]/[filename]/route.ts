@@ -12,7 +12,7 @@ export async function GET(
     return NextResponse.json({ error: "Invalid jobId" }, { status: 400 });
   }
 
-  if (!/^clip-\\d+-(raw|edited)\\.mp4$/i.test(filename)) {
+  if (!/^clip-\d+-(raw|edited)\.mp4$/i.test(filename)) {
     return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
   }
 
@@ -28,7 +28,7 @@ export async function GET(
 
   try {
     const response = await fetch(
-      `${workerUrl.replace(/\\/+$/, "")}/download/${encodeURIComponent(jobId)}/${encodeURIComponent(filename)}`,
+      `${workerUrl.replace(/\/+$/, "")}/download/${encodeURIComponent(jobId)}/${encodeURIComponent(filename)}`,
       {
         headers: {
           "x-worker-secret": workerSecret,
