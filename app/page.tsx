@@ -395,10 +395,9 @@ export default function Home() {
   const isDone = status?.status === "done";
 
   const progress = useMemo(() => {
-    // ONE overall progress bar:
+    // ONE overall progress bar. Keep it monotonic:
     // 0–40% = browser upload
-    // 40–100% = AI processing + clip rendering
-    // The percentage never jumps backwards when upload finishes.
+    // 40–100% = AI processing + clip rendering.
     if (isDone) return 100;
 
     if (isProcessing) {
@@ -518,6 +517,7 @@ export default function Home() {
 
     setError("");
     setStatus(null);
+    uploadProgressRef.current = 0;
     setUploadProgress(0);
 
     try {
@@ -557,28 +557,17 @@ export default function Home() {
 
       setJobId(newJobId);
 
-      const uploadSetupResponse = await fetch("/api/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jobId: newJobId,
-          ext: extension,
-        }),
-      });
+      const uploadUrlBase =
+      typeof createData.uploadUrlBase === "string"
+        ? createData.uploadUrlBase
+        : "";
 
-      const uploadSetupData = await uploadSetupResponse.json();
+    if (!uploadUrlBase) {
+      throw new Error("Could not prepare the video upload.");
+    }
 
-      if (!uploadSetupResponse.ok || !uploadSetupData.uploadUrl) {
-        throw new Error(
-          uploadSetupData.error ||
-            "Could not prepare the video upload."
-        );
-      }
-
-      const pathname = uploadSetupData.pathname as string;
-      const uploadUrl = uploadSetupData.uploadUrl as string;
+    const pathname = `uploads/${newJobId}/source.${extension}`;
+    const uploadUrl = `${uploadUrlBase}/${extension}`;
 
       const CHUNK_SIZE = 16 * 1024 * 1024;
       const PARALLEL_UPLOADS = 4;
@@ -638,7 +627,19 @@ export default function Home() {
           setUploadEta(eta);
         }
 
-        setUploadProgress(Math.min(100, Math.round((totalUploaded / totalBytes) * 100)));
+        // XHR retries can emit a fresh progress event starting at 0.
+        // Never let that make the upload percentage move backwards.
+        const nextProgress = Math.min(
+          100,
+          Math.round((totalUploaded / totalBytes) * 100)
+        );
+
+        uploadProgressRef.current = Math.max(
+          uploadProgressRef.current,
+          nextProgress
+        );
+
+        setUploadProgress(uploadProgressRef.current);
       };
 
       const uploadChunk = (index: number) =>
