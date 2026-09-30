@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setJobStatus } from "@/lib/jobStore";
-import { updateProjectStatus } from "@/lib/history";
 
 export const runtime = "nodejs";
 
