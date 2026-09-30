@@ -1,8 +1,154 @@
-import { ensureHistorySchema, sql } from "@/lib/db";
-export type ClipResult={index:number;title:string;hookReason:string;startTime:number;endTime:number;rawUrl:string;editedUrl:string};
-export type JobStatus={jobId:string;status:"queued"|"transcribing"|"detecting_hooks"|"rendering"|"done"|"error";progress:number;message?:string;clips?:ClipResult[];error?:string};
-const norm=(v:unknown)=>{const n=Number(v);return Number.isFinite(n)?Math.min(100,Math.max(0,Math.round(n))):0};
-export async function setJobStatus(jobId:string,patch:Partial<JobStatus>):Promise<JobStatus>{const id=String(jobId||"").trim();if(!id)throw new Error("jobId is required");await ensureHistorySchema();const status=patch.status||"queued";const progress=norm(patch.progress);const message=patch.message??null;const error=patch.error??null;const rows=await sql`UPDATE captify_projects SET status=${status},progress=${progress},message=${message},error=${error},completed_at=CASE WHEN ${status}='done' THEN NOW() ELSE completed_at END WHERE job_id=${id} RETURNING job_id,status,progress,message,error`;if(!rows.length)throw new Error("Job not found");const r=rows[0];return{jobId:r.job_id,status:r.status,progress:norm(r.progress),message:r.message||undefined,error:r.error||undefined,...(patch.clips?{clips:patch.clips}:{})}}
-export async function getJobStatus(jobId:string):Promise<JobStatus|null>{const id=String(jobId||"").trim();if(!id)return null;await ensureHistorySchema();const rows=await sql`SELECT id,job_id,status,progress,message,error FROM captify_projects WHERE job_id=${id} LIMIT 1`;if(!rows.length)return null;const r=rows[0];const clips=await sql`SELECT clip_index,title,hook_reason,start_time,end_time,raw_url,edited_url FROM captify_clips WHERE project_id=${r.id} ORDER BY clip_index ASC`;return{jobId:r.job_id,status:r.status,progress:norm(r.progress),message:r.message||undefined,error:r.error||undefined,clips:clips.map(c=>({index:Number(c.clip_index),title:c.title,hookReason:c.hook_reason||"",startTime:Number(c.start_time),endTime:Number(c.end_time),rawUrl:c.raw_url||"",editedUrl:c.edited_url||""}))}}
-export async function deleteJobStatus(_jobId:string){return false}
-export async function hasJobStatus(jobId:string){return(await getJobStatus(jobId))!==null}
+import { ensureJobSchema, sql } from "@/lib/db";
+
+export type ClipResult = {
+  index: number;
+  title: string;
+  hookReason: string;
+  startTime: number;
+  endTime: number;
+  rawUrl: string;
+  editedUrl: string;
+};
+
+export type JobStatus = {
+  jobId: string;
+  status:
+    | "queued"
+    | "transcribing"
+    | "detecting_hooks"
+    | "rendering"
+    | "done"
+    | "error";
+  progress: number;
+  message?: string;
+  clips?: ClipResult[];
+  error?: string;
+};
+
+const norm = (v: unknown) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0;
+};
+
+export async function createJob({
+  userId,
+  jobId,
+}: {
+  userId: string;
+  jobId: string;
+}): Promise<JobStatus> {
+  const id = String(jobId || "").trim();
+  if (!id) throw new Error("jobId is required");
+
+  await ensureJobSchema();
+
+  const rows = await sql`
+    INSERT INTO captify_jobs (user_id, job_id, status, progress, message)
+    VALUES (${userId}, ${id}, 'queued', 0, 'Job created. Waiting for upload.')
+    ON CONFLICT (job_id) DO NOTHING
+    RETURNING job_id, status, progress, message, error, clips
+  `;
+
+  if (!rows.length) throw new Error("Failed to create job");
+
+  const r = rows[0];
+  return {
+    jobId: r.job_id,
+    status: r.status,
+    progress: norm(r.progress),
+    message: r.message || undefined,
+    error: r.error || undefined,
+    clips: r.clips || undefined,
+  };
+}
+
+export async function setJobStatus(
+  jobId: string,
+  patch: Partial<JobStatus>
+): Promise<JobStatus> {
+  const id = String(jobId || "").trim();
+  if (!id) throw new Error("jobId is required");
+
+  await ensureJobSchema();
+
+  const status = patch.status || "queued";
+  const progress = norm(patch.progress);
+  const message = patch.message ?? null;
+  const error = patch.error ?? null;
+  const clips = patch.clips ?? null;
+
+  const rows = await sql`
+    UPDATE captify_jobs
+    SET
+      status = ${status},
+      progress = ${progress},
+      message = ${message},
+      error = ${error},
+      clips = COALESCE(${clips}::jsonb, clips),
+      completed_at = CASE
+        WHEN ${status} = 'done' THEN NOW()
+        ELSE completed_at
+      END
+    WHERE job_id = ${id}
+    RETURNING job_id, status, progress, message, error, clips
+  `;
+
+  if (!rows.length) throw new Error("Job not found");
+
+  const r = rows[0];
+
+  return {
+    jobId: r.job_id,
+    status: r.status,
+    progress: norm(r.progress),
+    message: r.message || undefined,
+    error: r.error || undefined,
+    clips: r.clips || undefined,
+  };
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatus | null> {
+  const id = String(jobId || "").trim();
+  if (!id) return null;
+
+  await ensureJobSchema();
+
+  const rows = await sql`
+    SELECT job_id, status, progress, message, error, clips
+    FROM captify_jobs
+    WHERE job_id = ${id}
+    LIMIT 1
+  `;
+
+  if (!rows.length) return null;
+
+  const r = rows[0];
+
+  return {
+    jobId: r.job_id,
+    status: r.status,
+    progress: norm(r.progress),
+    message: r.message || undefined,
+    error: r.error || undefined,
+    clips: r.clips || undefined,
+  };
+}
+
+export async function deleteJobStatus(jobId: string) {
+  const id = String(jobId || "").trim();
+  if (!id) return false;
+
+  await ensureJobSchema();
+
+  const rows = await sql`
+    DELETE FROM captify_jobs
+    WHERE job_id = ${id}
+    RETURNING job_id
+  `;
+
+  return rows.length > 0;
+}
+
+export async function hasJobStatus(jobId: string) {
+  return (await getJobStatus(jobId)) !== null;
+}
