@@ -29,20 +29,6 @@ export async function POST(req: NextRequest) {
       patch
     );
 
-    if (
-      patch.status === "done" ||
-      patch.status === "error"
-    ) {
-      await updateProjectStatus({
-        jobId: patch.jobId,
-        status: patch.status,
-        progress: patch.progress,
-        message: patch.message,
-        error: patch.error,
-        clips: patch.clips,
-      });
-    }
-
     return NextResponse.json(updated);
   } catch (error) {
     console.error(
