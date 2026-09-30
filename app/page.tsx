@@ -366,6 +366,11 @@ export default function Home() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadSpeed, setUploadSpeed] = useState(0);
   const [uploadEta, setUploadEta] = useState(0);
+  const displayedUploadStatsRef = useRef({
+    speed: 0,
+    eta: 0,
+    lastUpdateAt: 0,
+  });
   const uploadProgressRef = useRef(0);
   const uploadStatsRef = useRef({
     startedAt: 0,
@@ -479,6 +484,7 @@ export default function Home() {
       setUploadProgress(0);
       setUploadSpeed(0);
       setUploadEta(0);
+      displayedUploadStatsRef.current = { speed: 0, eta: 0, lastUpdateAt: 0 };
       uploadStatsRef.current = { startedAt: 0, lastSampleAt: 0, lastSampleBytes: 0, samples: [] };
     },
     []
@@ -606,10 +612,26 @@ export default function Home() {
         const fallbackSpeed = totalUploaded / elapsed;
         const speed = bytesPerSecond > 0 ? bytesPerSecond : fallbackSpeed;
 
-        setUploadSpeed(speed);
-
         const remaining = Math.max(0, totalBytes - totalUploaded);
-        setUploadEta(speed > 0 ? remaining / speed : 0);
+        const eta = speed > 0 ? remaining / speed : 0;
+
+        // Keep the displayed values stable. Calculate continuously, but only
+        // refresh the visible speed/ETA every 2.5 seconds using the recent
+        // rolling average. This avoids distracting rapid number changes.
+        const displayed = displayedUploadStatsRef.current;
+        if (
+          now - displayed.lastUpdateAt >= 2500 ||
+          displayed.lastUpdateAt === 0 ||
+          totalUploaded >= totalBytes
+        ) {
+          displayed.speed = speed;
+          displayed.eta = eta;
+          displayed.lastUpdateAt = now;
+
+          setUploadSpeed(speed);
+          setUploadEta(eta);
+        }
+
         setUploadProgress(Math.min(100, Math.round((totalUploaded / totalBytes) * 100)));
       };
 
@@ -689,7 +711,12 @@ export default function Home() {
       );
 
       setUploadProgress(100);
+      setUploadSpeed(uploadStatsRef.current.samples.length >= 2
+        ? ((totalBytes - uploadStatsRef.current.samples[0].bytes) /
+            Math.max(0.5, (Date.now() - uploadStatsRef.current.samples[0].time) / 1000))
+        : uploadSpeed);
       setUploadEta(0);
+      displayedUploadStatsRef.current.lastUpdateAt = Date.now();
 
       const processResponse =
         await fetch("/api/process", {
