@@ -28,6 +28,11 @@ const NEXT_APP_URL =
 
 const BGM_DIR = path.join(__dirname, "assets", "bgm");
 
+// Active job status is kept in memory on the worker as a live source of truth.
+// The browser can read this through the protected status endpoint, while the
+// database callback remains as a durable fallback.
+const activeJobStatuses = new Map();
+
 const ALLOWED_EXTENSIONS = new Set([
   "mp3",
   "wav",
@@ -72,6 +77,15 @@ function checkSecret(req, res, next) {
 // ------------------------------------------------------------
 
 async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
+  // Always update the worker's live status first. This prevents the UI from
+  // depending entirely on a remote callback while a job is actively running.
+  const previous = activeJobStatuses.get(jobId) || {};
+  activeJobStatuses.set(jobId, {
+    ...previous,
+    jobId,
+    ...statusUpdate,
+  });
+
   if (!statusBaseUrl) {
     console.error(`[${jobId}] NEXT_APP_URL is not configured`);
     return false;
@@ -122,6 +136,27 @@ async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
 
   return false;
 }
+
+// ------------------------------------------------------------
+// LIVE STATUS ENDPOINT
+// ------------------------------------------------------------
+
+app.get("/status/:jobId", checkSecret, (req, res) => {
+  const jobId = String(req.params.jobId || "").trim();
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+    return res.status(400).json({ error: "Invalid jobId" });
+  }
+
+  const status = activeJobStatuses.get(jobId);
+
+  if (!status) {
+    return res.status(404).json({ error: "Job status not found" });
+  }
+
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  return res.json(status);
+});
 
 // ------------------------------------------------------------
 // SNAP
