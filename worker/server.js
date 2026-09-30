@@ -766,11 +766,18 @@ async function runPipeline(
       clips,
     });
 
+    // Keep rendered results available so the browser can preview/download
+    // the clips after the job reaches 100%. Source uploads are still removed.
     try {
-      fs.rmSync(path.join(STORAGE_DIR, "uploads", jobId), { recursive: true, force: true });
-      fs.rmSync(resultsDir, { recursive: true, force: true });
+      fs.rmSync(path.join(STORAGE_DIR, "uploads", jobId), {
+        recursive: true,
+        force: true,
+      });
     } catch (cleanupError) {
-      console.warn(`[${jobId}] final cleanup failed:`, cleanupError?.message || cleanupError);
+      console.warn(
+        `[${jobId}] source cleanup failed:`,
+        cleanupError?.message || cleanupError
+      );
     }
 
     console.log(
