@@ -415,6 +415,8 @@ export default function Home() {
   }, [isProcessing, isDone, status?.progress, uploadProgress]);
 
   const pollingCancelRef = useRef<(() => void) | null>(null);
+  const highestProgressRef = useRef(0);
+  const terminalStatusRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     pollingCancelRef.current?.();
@@ -446,14 +448,39 @@ export default function Home() {
 
         const data = (await response.json()) as JobStatus;
 
-        setStatus(data);
-
-        if (
-          data.status === "done" ||
-          data.status === "error"
-        ) {
-          stopPolling();
+        // Status must only move forward. Even if a cached/late response ever
+        // arrives, it can never pull the UI back from 100% to 41%.
+        if (terminalStatusRef.current) {
+          return;
         }
+
+        if (data.status === "done" || data.status === "error") {
+          terminalStatusRef.current = true;
+          highestProgressRef.current = 100;
+          setStatus(data);
+          stopPolling();
+          return;
+        }
+
+        const incomingProgress = Math.max(
+          0,
+          Math.min(100, Number(data.progress) || 0)
+        );
+
+        if (incomingProgress < highestProgressRef.current) {
+          setStatus((current) =>
+            current
+              ? {
+                  ...current,
+                  message: data.message || current.message,
+                }
+              : data
+          );
+          return;
+        }
+
+        highestProgressRef.current = incomingProgress;
+        setStatus(data);
       } catch (err) {
         console.error(err);
       }
@@ -538,6 +565,8 @@ export default function Home() {
     setError("");
     setStatus(null);
     uploadProgressRef.current = 0;
+    highestProgressRef.current = 0;
+    terminalStatusRef.current = false;
     setUploadProgress(0);
 
     try {
@@ -796,6 +825,9 @@ export default function Home() {
 
         throw new Error(message);
       }
+
+      highestProgressRef.current = 1;
+      terminalStatusRef.current = false;
 
       setStatus({
         jobId: newJobId,
