@@ -313,10 +313,13 @@ app.post("/process", checkSecret, (req, res) => {
 
   res.status(202).json({ received: true, jobId: cleanJobId, status: "queued" });
 
+  // Pass the site origin to pushStatus(). pushStatus() itself appends
+  // /api/internal/status. Passing the endpoint here would create the old
+  // /api/internal/status/api/internal/status bug.
   const callbackStatusUrl =
     typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl)
-      ? new URL("/api/internal/status", statusUrl).toString()
-      : new URL("/api/internal/status", NEXT_APP_URL).toString();
+      ? statusUrl.replace(/\/+$/, "")
+      : NEXT_APP_URL.replace(/\/+$/, "");
 
   runPipeline(cleanJobId, cleanExt, localSourcePath, options || {}, callbackStatusUrl).catch(async (err) => {
     console.error(`[${cleanJobId}] Pipeline crashed:`, err);
