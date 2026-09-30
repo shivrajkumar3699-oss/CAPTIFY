@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { issueSignedToken, presignUrl } from "@vercel/blob";
+import { createB2PresignedUrl } from "@/lib/b2";
 import { setJobStatus } from "@/lib/jobStore";
 import { updateProjectOptions } from "@/lib/history";
 
@@ -17,11 +17,8 @@ export async function POST(req: NextRequest) {
     if (typeof sourcePathname !== "string" || !/^uploads\/[a-zA-Z0-9_-]+\/source\.(mp3|wav|mp4|mkv)$/i.test(sourcePathname))
       return NextResponse.json({ error: "Invalid sourcePathname." }, { status: 400 });
 
-    const signedToken = await issueSignedToken({ pathname: sourcePathname, operations: ["get"], validUntil: Date.now() + 60 * 60 * 1000 });
-    const { presignedUrl: workerSourceUrl } = await presignUrl(signedToken, {
-      pathname: sourcePathname, operation: "get", access: "private",
-      validUntil: Date.now() + 60 * 60 * 1000,
-    });
+    const workerSourceUrl = createB2PresignedUrl("GET", sourcePathname, 60 * 60);
+    const sourceDeleteUrl = createB2PresignedUrl("DELETE", sourcePathname, 60 * 60);
 
     const safeOptions = options || {};
     await updateProjectOptions({
@@ -44,7 +41,7 @@ export async function POST(req: NextRequest) {
     const workerResponse = await fetch(workerUrl.replace(/\/+$/, "") + "/process", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-worker-secret": process.env.WORKER_SECRET || "" },
-      body: JSON.stringify({ jobId, ext, sourceUrl: workerSourceUrl, options: safeOptions, statusUrl }),
+      body: JSON.stringify({ jobId, ext, sourceUrl: workerSourceUrl, sourceDeleteUrl, options: safeOptions, statusUrl }),
     });
 
     if (!workerResponse.ok) {
