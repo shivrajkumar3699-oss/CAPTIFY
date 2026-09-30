@@ -181,9 +181,6 @@ const MAX_UPLOAD_SIZE = 3 * 1024 * 1024 * 1024;
 const MAX_CHUNK_SIZE = 32 * 1024 * 1024;
 
 function uploadCors(req, res, next) {
-  const origin = req.headers.origin;
-  const allowedOrigin = true;
-
   // Upload endpoint is intentionally unauthenticated so the browser can
   // stream multi-GB chunks directly to Render without exposing WORKER_SECRET.
   // The jobId is a cryptographically random UUID created by the authenticated app.
@@ -327,13 +324,6 @@ async function runPipeline(
       "STORAGE_DIR is not configured"
     );
   }
-
-  const sourcePath = path.join(
-    STORAGE_DIR,
-    "uploads",
-    jobId,
-    `source.${ext}`
-  );
 
   const resultsDir = path.join(
     STORAGE_DIR,
