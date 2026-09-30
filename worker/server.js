@@ -72,34 +72,55 @@ function checkSecret(req, res, next) {
 // ------------------------------------------------------------
 
 async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
-  try {
-    if (!statusBaseUrl) {
-      console.error(
-        `[${jobId}] NEXT_APP_URL is not configured`
-      );
-      return;
-    }
+  if (!statusBaseUrl) {
+    console.error(`[${jobId}] NEXT_APP_URL is not configured`);
+    return false;
+  }
 
-    await fetch(
-      `${statusBaseUrl.replace(/\/+$/, "")}/api/internal/status`,
-      {
+  const url = `${statusBaseUrl.replace(/\\/+$/, "")}/api/internal/status`;
+  const payload = { jobId, ...statusUpdate };
+
+  // The UI depends on these callbacks. Retry transient Vercel/network
+  // failures so the browser cannot remain stuck while rendering succeeds.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-worker-secret": WORKER_SECRET || "",
         },
-        body: JSON.stringify({
-          jobId,
-          ...statusUpdate,
-        }),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        return true;
       }
-    );
-  } catch (err) {
-    console.error(
-      `[${jobId}] Failed to push status update:`,
-      err.message
-    );
+
+      const body = await response.text().catch(() => "");
+      console.error(
+        `[${jobId}] Status callback failed (attempt ${attempt}/3): HTTP ${response.status}${body ? ` — ${body.slice(0, 300)}` : ""}`
+      );
+    } catch (err) {
+      clearTimeout(timeout);
+      console.error(
+        `[${jobId}] Status callback failed (attempt ${attempt}/3):`,
+        err?.message || err
+      );
+    }
+
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
   }
+
+  return false;
 }
 
 // ------------------------------------------------------------
