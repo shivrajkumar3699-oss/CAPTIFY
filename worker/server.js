@@ -91,7 +91,7 @@ async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
     return false;
   }
 
-  const url = `${statusBaseUrl.replace(/\\/+$/, "")}/api/internal/status`;
+  const url = `${statusBaseUrl.replace(/\/+$/, "")}/api/internal/status`;
   const payload = { jobId, ...statusUpdate };
 
   // The UI depends on these callbacks. Retry transient Vercel/network
