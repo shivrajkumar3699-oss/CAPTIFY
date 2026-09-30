@@ -234,8 +234,8 @@ app.post("/process", checkSecret, (req, res) => {
   // Process in background.
   const callbackStatusUrl =
     typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl)
-      ? statusUrl
-      : NEXT_APP_URL;
+      ? new URL("/api/internal/status", statusUrl).toString()
+      : new URL("/api/internal/status", NEXT_APP_URL).toString();
 
   runPipeline(
     cleanJobId,
