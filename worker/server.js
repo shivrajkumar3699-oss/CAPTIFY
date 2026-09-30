@@ -182,14 +182,12 @@ const MAX_CHUNK_SIZE = 32 * 1024 * 1024;
 
 function uploadCors(req, res, next) {
   const origin = req.headers.origin;
-  const allowedOrigin =
-    !origin ||
-    origin === NEXT_APP_URL ||
-    /^https?:\/\/localhost(?::\d+)?$/.test(origin);
+  const allowedOrigin = true;
 
-  if (allowedOrigin) {
-    res.setHeader("Access-Control-Allow-Origin", origin || "*");
-  }
+  // Upload endpoint is intentionally unauthenticated so the browser can
+  // stream multi-GB chunks directly to Render without exposing WORKER_SECRET.
+  // The jobId is a cryptographically random UUID created by the authenticated app.
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "PUT, OPTIONS");
   res.setHeader(
@@ -198,7 +196,6 @@ function uploadCors(req, res, next) {
   );
 
   if (req.method === "OPTIONS") return res.sendStatus(204);
-  if (!allowedOrigin) return res.status(403).json({ error: "Origin not allowed." });
   next();
 }
 
