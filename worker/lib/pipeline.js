@@ -162,25 +162,11 @@ function cutRawClip(
       .setStartTime(Number(startTime))
       .setDuration(duration)
 
-      // Force video/audio codecs explicitly.
-      .videoCodec("libx264")
-      .audioCodec("aac")
-
+      // Raw clips do not need a second full video encode.
+      // Stream-copy keeps FFmpeg memory usage low on Render's free instance.
       .outputOptions([
-        "-preset",
-        "veryfast",
-
-        "-crf",
-        "18",
-
-        "-pix_fmt",
-        "yuv420p",
-
-        "-b:a",
-        "160k",
-
-        "-movflags",
-        "+faststart",
+        "-c",
+        "copy",
 
         // Make timestamps start cleanly from zero.
         "-avoid_negative_ts",
@@ -493,11 +479,15 @@ function buildEditedClip(
           .audioCodec("aac")
 
           .outputOptions([
+            // Keep x264 memory usage bounded on Render.
+            "-threads",
+            "1",
+
             "-preset",
-            "veryfast",
+            "ultrafast",
 
             "-crf",
-            "21",
+            "23",
 
             "-pix_fmt",
             "yuv420p",
