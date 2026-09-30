@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { issueSignedToken, presignUrl } from "@vercel/blob";
+import { createB2PresignedUrl } from "@/lib/b2";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -50,24 +50,11 @@ export async function POST(request: Request) {
     }
 
     const pathname = `uploads/${jobId}/source.${ext}`;
-    const validUntil = Date.now() + 60 * 60 * 1000;
-
-    const signedToken = await issueSignedToken({
-      pathname,
-      operations: ["put"],
-      validUntil,
-      maximumSizeInBytes: MAX_UPLOAD_SIZE,
-    });
-
-    const { presignedUrl } = await presignUrl(signedToken, {
-      pathname,
-      operation: "put",
-      access: "private",
-      validUntil,
-    });
+    const presignedUrl = createB2PresignedUrl("PUT", pathname, 60 * 60);
 
     return NextResponse.json({
       ok: true,
+      provider: "backblaze-b2",
       pathname,
       presignedUrl,
     });
