@@ -104,6 +104,22 @@ function getExtension(name: string) {
   return parts.length > 1 ? parts.pop() || "" : "";
 }
 
+function formatEta(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "Calculating...";
+  const total = Math.max(1, Math.ceil(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) return `About ${hours}h ${minutes}m remaining`;
+  if (minutes > 0) return `About ${minutes}m ${secs}s remaining`;
+  return `About ${secs}s remaining`;
+}
+
+function formatMbps(bytesPerSecond: number) {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "0.0 Mbps";
+  return `${((bytesPerSecond * 8) / 1_000_000).toFixed(1)} Mbps`;
+}
+
 function getStatusLabel(status: JobStatus["status"]) {
   switch (status) {
     case "queued":
@@ -348,7 +364,15 @@ export default function Home() {
   const [framing, setFraming] = useState<"fill" | "fit">("fill");
 
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadSpeed, setUploadSpeed] = useState(0);
+  const [uploadEta, setUploadEta] = useState(0);
   const uploadProgressRef = useRef(0);
+  const uploadStatsRef = useRef({
+    startedAt: 0,
+    lastSampleAt: 0,
+    lastSampleBytes: 0,
+    samples: [] as Array<{ time: number; bytes: number }>,
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -453,6 +477,9 @@ export default function Home() {
       setStatus(null);
       setJobId("");
       setUploadProgress(0);
+      setUploadSpeed(0);
+      setUploadEta(0);
+      uploadStatsRef.current = { startedAt: 0, lastSampleAt: 0, lastSampleBytes: 0, samples: [] };
     },
     []
   );
@@ -531,49 +558,138 @@ export default function Home() {
 
       const uploadSetupData = await uploadSetupResponse.json();
 
-      if (!uploadSetupResponse.ok || !uploadSetupData.presignedUrl) {
+      if (!uploadSetupResponse.ok || !uploadSetupData.uploadUrl) {
         throw new Error(
           uploadSetupData.error ||
             "Could not prepare the video upload."
         );
       }
 
-      const pathname =
-        uploadSetupData.pathname as string;
-      const presignedUrl =
-        uploadSetupData.presignedUrl as string;
+      const pathname = uploadSetupData.pathname as string;
+      const uploadUrl = uploadSetupData.uploadUrl as string;
 
-      // Upload directly from the browser to Backblaze B2.
-      // Vercel never receives the 3 GB file.
-      const uploadResponse = await new Promise<Response>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("PUT", presignedUrl, true);
-        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const nextProgress = Math.round((event.loaded / event.total) * 100);
-            uploadProgressRef.current = nextProgress;
-            setUploadProgress(nextProgress);
-          }
-        };
-        xhr.onload = () => resolve(new Response(xhr.responseText || "", { status: xhr.status, statusText: xhr.statusText }));
-        xhr.onerror = () => reject(new Error("Backblaze B2 upload failed. Check the bucket CORS settings."));
-        xhr.onabort = () => reject(new Error("Upload was cancelled."));
-        xhr.send(file);
-      });
+      const CHUNK_SIZE = 16 * 1024 * 1024;
+      const PARALLEL_UPLOADS = 4;
+      const MAX_RETRIES = 3;
+      const totalBytes = file.size;
 
-      if (!uploadResponse.ok) {
-        let details = "";
-        try { details = (await uploadResponse.text()).trim(); } catch {}
-        throw new Error(details ? `B2 upload failed (HTTP ${uploadResponse.status}): ${details}` : `B2 upload failed (HTTP ${uploadResponse.status}).`);
-      }
-      uploadProgressRef.current = 100;
+      uploadStatsRef.current = {
+        startedAt: Date.now(),
+        lastSampleAt: Date.now(),
+        lastSampleBytes: 0,
+        samples: [{ time: Date.now(), bytes: 0 }],
+      };
+
+      const chunkCount = Math.ceil(totalBytes / CHUNK_SIZE);
+      const uploaded = new Array<number>(chunkCount).fill(0);
+
+      const updateUploadStats = (totalUploaded: number) => {
+        const now = Date.now();
+        const stats = uploadStatsRef.current;
+        const elapsed = Math.max(0.001, (now - stats.startedAt) / 1000);
+
+        if (now - stats.lastSampleAt >= 900) {
+          stats.samples.push({ time: now, bytes: totalUploaded });
+          stats.samples = stats.samples.filter((sample) => now - sample.time <= 8000);
+          stats.lastSampleAt = now;
+          stats.lastSampleBytes = totalUploaded;
+        }
+
+        const recent = stats.samples.length >= 2
+          ? stats.samples[0]
+          : { time: stats.startedAt, bytes: 0 };
+
+        const recentSeconds = Math.max(0.5, (now - recent.time) / 1000);
+        const recentBytes = Math.max(0, totalUploaded - recent.bytes);
+        const bytesPerSecond = recentBytes / recentSeconds;
+
+        const fallbackSpeed = totalUploaded / elapsed;
+        const speed = bytesPerSecond > 0 ? bytesPerSecond : fallbackSpeed;
+
+        setUploadSpeed(speed);
+
+        const remaining = Math.max(0, totalBytes - totalUploaded);
+        setUploadEta(speed > 0 ? remaining / speed : 0);
+        setUploadProgress(Math.min(100, Math.round((totalUploaded / totalBytes) * 100)));
+      };
+
+      const uploadChunk = (index: number) =>
+        new Promise<void>((resolve, reject) => {
+          const start = index * CHUNK_SIZE;
+          const end = Math.min(totalBytes, start + CHUNK_SIZE);
+          const blob = file.slice(start, end);
+          let attempt = 0;
+
+          const send = () => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("PUT", uploadUrl, true);
+            xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+            xhr.setRequestHeader("Content-Range", `bytes ${start}-${end - 1}/${totalBytes}`);
+            xhr.setRequestHeader("X-Upload-Total", String(totalBytes));
+            xhr.setRequestHeader("X-Upload-Offset", String(start));
+
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                uploaded[index] = Math.min(blob.size, event.loaded);
+                updateUploadStats(uploaded.reduce((sum, value) => sum + value, 0));
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                uploaded[index] = blob.size;
+                updateUploadStats(uploaded.reduce((sum, value) => sum + value, 0));
+                resolve();
+                return;
+              }
+
+              if (attempt < MAX_RETRIES) {
+                attempt += 1;
+                setTimeout(send, 500 * attempt);
+                return;
+              }
+
+              reject(new Error(`Upload chunk failed (HTTP ${xhr.status}).`));
+            };
+
+            xhr.onerror = () => {
+              if (attempt < MAX_RETRIES) {
+                attempt += 1;
+                setTimeout(send, 500 * attempt);
+              } else {
+                reject(new Error("Upload connection failed after several retries."));
+              }
+            };
+
+            xhr.onabort = () => reject(new Error("Upload was cancelled."));
+            xhr.send(blob);
+          };
+
+          send();
+        });
+
+      // Send the first chunk alone so the worker can safely create the
+      // destination file. The remaining chunks then upload in parallel.
+      await uploadChunk(0);
+
+      let nextChunk = 1;
+      const worker = async () => {
+        while (true) {
+          const index = nextChunk++;
+          if (index >= chunkCount) return;
+          await uploadChunk(index);
+        }
+      };
+
+      await Promise.all(
+        Array.from(
+          { length: Math.min(PARALLEL_UPLOADS, Math.max(0, chunkCount - 1)) },
+          () => worker()
+        )
+      );
+
       setUploadProgress(100);
-
-      // Upload is finished. From this point onward the worker owns the
-      // progress value, so the upload percentage must not leak into it.
-      uploadProgressRef.current = 0;
-      setUploadProgress(0);
+      setUploadEta(0);
 
       const processResponse =
         await fetch("/api/process", {
@@ -680,6 +796,9 @@ export default function Home() {
     setStatus(null);
     uploadProgressRef.current = 0;
     setUploadProgress(0);
+    setUploadSpeed(0);
+    setUploadEta(0);
+    uploadStatsRef.current = { startedAt: 0, lastSampleAt: 0, lastSampleBytes: 0, samples: [] };
     setError("");
     setCopied(null);
 
@@ -1079,21 +1198,45 @@ export default function Home() {
                         </div>
 
                         {uploadProgress > 0 &&
-                          uploadProgress <
-                            100 &&
+                          uploadProgress < 100 &&
                           !isProcessing && (
-                            <div className="mt-4">
-                              <div className="mb-2 flex justify-between text-[9px] font-black uppercase tracking-[0.14em] text-white/25">
-                                <span>
+                            <div className="mt-4 rounded-2xl border border-white/[0.07] bg-black/[0.18] p-4">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-white/35">
                                   Uploading
                                 </span>
-                                <span>
-                                  {
-                                    uploadProgress
-                                  }
-                                  %
+                                <span className="text-sm font-black text-[#F7D002]">
+                                  {uploadProgress}%
                                 </span>
                               </div>
+
+                              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+                                <div
+                                  className="h-full rounded-full bg-[#F7D002] transition-all duration-200"
+                                  style={{ width: `${uploadProgress}%` }}
+                                />
+                              </div>
+
+                              <div className="mt-3 grid grid-cols-2 gap-3">
+                                <div>
+                                  <p className="text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
+                                    Approx. speed
+                                  </p>
+                                  <p className="mt-1 text-xs font-bold text-white/65">
+                                    {formatMbps(uploadSpeed)}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
+                                    Time remaining
+                                  </p>
+                                  <p className="mt-1 text-xs font-bold text-white/65">
+                                    {formatEta(uploadEta)}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}                      </div>
 
                               <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]">
                                 <div
