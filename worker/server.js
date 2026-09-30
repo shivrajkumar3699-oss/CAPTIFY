@@ -186,6 +186,7 @@ app.post("/process", checkSecret, (req, res) => {
     sourceUrl,
     options,
     statusUrl,
+    sourceDeleteUrl,
   } = req.body || {};
 
   if (!jobId || !ext || !sourceUrl) {
@@ -242,7 +243,8 @@ app.post("/process", checkSecret, (req, res) => {
     cleanExt,
     sourceUrl,
     options || {},
-    callbackStatusUrl
+    callbackStatusUrl,
+    sourceDeleteUrl
   ).catch(async (err) => {
     console.error(
       `[${cleanJobId}] Pipeline crashed:`,
@@ -275,7 +277,8 @@ async function runPipeline(
   ext,
   sourceUrl,
   options,
-  statusBaseUrl = NEXT_APP_URL
+  statusBaseUrl = NEXT_APP_URL,
+  sourceDeleteUrl = ""
 ) {
   if (!STORAGE_DIR) {
     throw new Error(
@@ -353,7 +356,7 @@ async function runPipeline(
 
   try {
     // ----------------------------------------------------------
-    // Download source from Vercel Blob
+    // Download source from Backblaze B2
     // ----------------------------------------------------------
 
     if (!sourceUrl) {
@@ -361,7 +364,7 @@ async function runPipeline(
     }
 
     console.log(
-      `[${jobId}] Downloading source from Blob`
+      `[${jobId}] Downloading source from Backblaze B2`
     );
 
     fs.mkdirSync(
@@ -373,7 +376,7 @@ async function runPipeline(
 
     if (!blobResponse.ok || !blobResponse.body) {
       throw new Error(
-        `Failed to download source from Blob (HTTP ${blobResponse.status})`
+        `Failed to download source from Backblaze B2 (HTTP ${blobResponse.status})`
       );
     }
 
@@ -381,6 +384,27 @@ async function runPipeline(
       Readable.fromWeb(blobResponse.body),
       fs.createWriteStream(sourcePath)
     );
+
+    if (sourceDeleteUrl) {
+      try {
+        const deleteResponse = await fetch(sourceDeleteUrl, {
+          method: "DELETE",
+        });
+
+        if (!deleteResponse.ok) {
+          console.warn(
+            `[${jobId}] B2 source cleanup returned HTTP ${deleteResponse.status}`
+          );
+        } else {
+          console.log(`[${jobId}] B2 source deleted`);
+        }
+      } catch (deleteError) {
+        console.warn(
+          `[${jobId}] B2 source cleanup failed (non-fatal):`,
+          deleteError?.message || deleteError
+        );
+      }
+    }
 
     // ----------------------------------------------------------
     // Validate source
