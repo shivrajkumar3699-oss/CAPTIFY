@@ -315,7 +315,7 @@ async function runPipeline(
   const clipCount = Math.max(
     1,
     Math.min(
-      20,
+      7,
       Number(
         options.clipCount ||
         options.numClips ||
@@ -794,7 +794,7 @@ app.get("/download/:jobId/:filename", checkSecret, (req, res) => {
     return res.status(400).json({ error: "Invalid jobId" });
   }
 
-  if (!/^clip-\\d+-(raw|edited)\\.mp4$/i.test(filename)) {
+  if (!/^clip-\d+-(raw|edited)\.mp4$/i.test(filename)) {
     return res.status(400).json({ error: "Invalid filename" });
   }
 
