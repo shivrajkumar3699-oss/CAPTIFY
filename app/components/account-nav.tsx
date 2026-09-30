@@ -27,12 +27,7 @@ export default function AccountNav() {
       </SignedOut>
 
       <SignedIn>
-        <Link
-          href="/history"
-          className="rounded-full border border-white/[0.10] bg-black/65 px-4 py-2.5 text-xs font-bold text-white/70 shadow-2xl backdrop-blur-2xl transition hover:border-[#F7D002]/30 hover:bg-white/[0.07] hover:text-white"
-        >
-          History
-        </Link>
+
 
         <UserButton />
       </SignedIn>
