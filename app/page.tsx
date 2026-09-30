@@ -543,30 +543,30 @@ export default function Home() {
       const presignedUrl =
         uploadSetupData.presignedUrl as string;
 
-      // Vercel Blob signed PUT URLs are designed to be consumed with
-      // a native fetch PUT. Do not add a manual Content-Type header here:
-      // the File/Blob body provides its content type to the Blob endpoint.
-      const uploadResponse = await fetch(presignedUrl, {
-        method: "PUT",
-        body: file,
+      // Upload directly from the browser to Backblaze B2.
+      // Vercel never receives the 3 GB file.
+      const uploadResponse = await new Promise<Response>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", presignedUrl, true);
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const nextProgress = Math.round((event.loaded / event.total) * 100);
+            uploadProgressRef.current = nextProgress;
+            setUploadProgress(nextProgress);
+          }
+        };
+        xhr.onload = () => resolve(new Response(xhr.responseText || "", { status: xhr.status, statusText: xhr.statusText }));
+        xhr.onerror = () => reject(new Error("Backblaze B2 upload failed. Check the bucket CORS settings."));
+        xhr.onabort = () => reject(new Error("Upload was cancelled."));
+        xhr.send(file);
       });
 
       if (!uploadResponse.ok) {
         let details = "";
-
-        try {
-          details = (await uploadResponse.text()).trim();
-        } catch {
-          // Ignore an unreadable error body.
-        }
-
-        throw new Error(
-          details
-            ? `Blob upload failed (HTTP ${uploadResponse.status}): ${details}`
-            : `Blob upload failed (HTTP ${uploadResponse.status}).`
-        );
+        try { details = (await uploadResponse.text()).trim(); } catch {}
+        throw new Error(details ? `B2 upload failed (HTTP ${uploadResponse.status}): ${details}` : `B2 upload failed (HTTP ${uploadResponse.status}).`);
       }
-
       uploadProgressRef.current = 100;
       setUploadProgress(100);
 
