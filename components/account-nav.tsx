@@ -34,12 +34,6 @@ export default function AccountNav() {
 
   return (
     <div className="fixed right-4 top-4 z-[100] flex items-center gap-2 sm:right-6 sm:top-5">
-      <Link
-        href="/history"
-        className="rounded-full border border-white/[0.10] bg-black/65 px-4 py-2.5 text-xs font-bold text-white/70 shadow-2xl backdrop-blur-2xl transition hover:border-[#F7D002]/30 hover:bg-white/[0.07] hover:text-white"
-      >
-        History
-      </Link>
 
       <UserButton />
     </div>
