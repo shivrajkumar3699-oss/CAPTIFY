@@ -1236,17 +1236,6 @@ export default function Home() {
                                 </div>
                               </div>
                             </div>
-                          )}                      </div>
-
-                              <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]">
-                                <div
-                                  className="h-full rounded-full bg-[#F7D002] transition-all duration-200"
-                                  style={{
-                                    width: `${uploadProgress}%`,
-                                  }}
-                                />
-                              </div>
-                            </div>
                           )}
                       </div>
                     </div>
