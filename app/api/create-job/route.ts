@@ -20,8 +20,27 @@ export async function POST() {
 
     await createJob({ userId, jobId });
 
+    const workerUrl = process.env.WORKER_URL;
+
+    if (!workerUrl) {
+      return NextResponse.json(
+        { ok: false, error: "WORKER_URL is not configured." },
+        { status: 500 }
+      );
+    }
+
+    // Return the direct worker upload target with job creation so the browser
+    // does not need a second Vercel request before the upload can start.
+    const cleanWorkerUrl = workerUrl.replace(/\/+$/, "");
+
     return NextResponse.json(
-      { ok: true, jobId, status: "queued" },
+      {
+        ok: true,
+        jobId,
+        status: "queued",
+        pathname: `uploads/${jobId}/source.`,
+        uploadUrlBase: `${cleanWorkerUrl}/upload/${encodeURIComponent(jobId)}`,
+      },
       { status: 200 }
     );
   } catch (error) {
