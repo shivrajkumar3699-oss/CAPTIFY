@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { createB2PresignedUrl } from "@/lib/b2";
 import { setJobStatus } from "@/lib/jobStore";
-import { updateProjectOptions } from "@/lib/history";
 
 export const runtime = "nodejs";
 
@@ -21,16 +20,6 @@ export async function POST(req: NextRequest) {
     const sourceDeleteUrl = createB2PresignedUrl("DELETE", sourcePathname, 60 * 60);
 
     const safeOptions = options || {};
-    await updateProjectOptions({
-      userId, jobId,
-      videoLanguage: safeOptions.audioLanguage || "auto",
-      captionLanguage: safeOptions.captionLanguage || "same",
-      captionColor: safeOptions.captionColor || "#FFE600",
-      numClips: Number(safeOptions.numClips) || 6,
-      bgmEnabled: Boolean(safeOptions.bgm ?? safeOptions.useBgm),
-      framing: safeOptions.framing || "fit",
-    });
-
     await setJobStatus(jobId, { status: "queued", progress: 0, message: "Job queued, waiting for worker to pick it up" });
 
     const workerUrl = process.env.WORKER_URL;
