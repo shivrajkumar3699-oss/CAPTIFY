@@ -4,8 +4,6 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const { Readable } = require("stream");
-const { pipeline } = require("stream/promises");
 
 const { extractAudio, transcribeWithTimestamps } = require("./lib/transcribe");
 const { detectHookSegments } = require("./lib/detectHooks");
@@ -176,95 +174,143 @@ function snapSegmentToWords(seg, words, videoDuration) {
 }
 
 // ------------------------------------------------------------
+// DIRECT CHUNKED UPLOAD
+// ------------------------------------------------------------
+
+const MAX_UPLOAD_SIZE = 3 * 1024 * 1024 * 1024;
+const MAX_CHUNK_SIZE = 32 * 1024 * 1024;
+
+function uploadCors(req, res, next) {
+  const origin = req.headers.origin;
+  const allowedOrigin =
+    !origin ||
+    origin === NEXT_APP_URL ||
+    /^https?:\/\/localhost(?::\d+)?$/.test(origin);
+
+  if (allowedOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  }
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "PUT, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset"
+  );
+
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  if (!allowedOrigin) return res.status(403).json({ error: "Origin not allowed." });
+  next();
+}
+
+app.options("/upload/:jobId/:ext", uploadCors);
+
+app.put("/upload/:jobId/:ext", uploadCors, async (req, res) => {
+  const jobId = String(req.params.jobId || "").trim();
+  const ext = String(req.params.ext || "").trim().toLowerCase();
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) return res.status(400).json({ error: "Invalid jobId." });
+  if (!ALLOWED_EXTENSIONS.has(ext)) return res.status(400).json({ error: "Unsupported file type." });
+
+  const total = Number(req.headers["x-upload-total"]);
+  const offset = Number(req.headers["x-upload-offset"]);
+  const contentLength = Number(req.headers["content-length"]);
+
+  if (
+    !Number.isSafeInteger(total) || total <= 0 || total > MAX_UPLOAD_SIZE ||
+    !Number.isSafeInteger(offset) || offset < 0 ||
+    !Number.isSafeInteger(contentLength) || contentLength <= 0 ||
+    contentLength > MAX_CHUNK_SIZE || offset + contentLength > total
+  ) {
+    return res.status(400).json({ error: "Invalid upload chunk." });
+  }
+
+  const range = String(req.headers["content-range"] || "");
+  const expectedRange = `bytes ${offset}-${offset + contentLength - 1}/${total}`;
+  if (range !== expectedRange) {
+    return res.status(400).json({ error: "Invalid Content-Range.", expected: expectedRange });
+  }
+
+  if (!STORAGE_DIR) return res.status(500).json({ error: "STORAGE_DIR is not configured." });
+
+  const sourcePath = path.join(STORAGE_DIR, "uploads", jobId, `source.${ext}`);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+
+  try {
+    if (offset === 0 && !fs.existsSync(sourcePath)) {
+      const fd = fs.openSync(sourcePath, "w");
+      try { fs.ftruncateSync(fd, total); } finally { fs.closeSync(fd); }
+    } else if (!fs.existsSync(sourcePath)) {
+      return res.status(409).json({ error: "Upload must start with the first chunk." });
+    }
+
+    const writeStream = fs.createWriteStream(sourcePath, { flags: "r+", start: offset });
+    await pipelineRequest(req, writeStream);
+
+    const complete = offset + contentLength === total;
+    return res.status(complete ? 201 : 204).json(
+      complete ? { ok: true, complete: true, bytes: total } : undefined
+    );
+  } catch (error) {
+    console.error(`[upload:${jobId}] Chunk failed:`, error?.message || error);
+    return res.status(500).json({ error: "Upload chunk failed." });
+  }
+});
+
+function pipelineRequest(req, destination) {
+  return new Promise((resolve, reject) => {
+    req.on("error", reject);
+    destination.on("error", reject);
+    destination.on("finish", resolve);
+    req.pipe(destination);
+  });
+}
+
+// ------------------------------------------------------------
 // PROCESS ENDPOINT
 // ------------------------------------------------------------
 
 app.post("/process", checkSecret, (req, res) => {
-  const {
-    jobId,
-    ext,
-    sourceUrl,
-    options,
-    statusUrl,
-    sourceDeleteUrl,
-  } = req.body || {};
+  const { jobId, ext, sourcePath, options, statusUrl } = req.body || {};
 
-  if (!jobId || !ext || !sourceUrl) {
-    return res.status(400).json({
-      error:
-        "jobId, ext, and sourceUrl are required",
-    });
-  }
-
-  if (
-    typeof sourceUrl !== "string" ||
-    !/^https?:\/\//i.test(sourceUrl)
-  ) {
-    return res.status(400).json({
-      error: "Invalid sourceUrl",
-    });
+  if (!jobId || !ext || !sourcePath) {
+    return res.status(400).json({ error: "jobId, ext, and sourcePath are required" });
   }
 
   const cleanJobId = String(jobId).trim();
-  const cleanExt = String(ext)
-    .trim()
-    .toLowerCase();
+  const cleanExt = String(ext).trim().toLowerCase();
+  const cleanSourcePath = String(sourcePath).trim();
 
-  if (
-    !/^[a-zA-Z0-9_-]+$/.test(cleanJobId)
-  ) {
-    return res.status(400).json({
-      error: "Invalid jobId",
-    });
+  if (!/^[a-zA-Z0-9_-]+$/.test(cleanJobId)) return res.status(400).json({ error: "Invalid jobId" });
+  if (!ALLOWED_EXTENSIONS.has(cleanExt)) return res.status(400).json({ error: "Unsupported file type." });
+
+  const expectedSource = `uploads/${cleanJobId}/source.${cleanExt}`;
+  if (cleanSourcePath !== expectedSource) return res.status(400).json({ error: "Invalid sourcePath" });
+
+  const localSourcePath = path.join(STORAGE_DIR || "", "uploads", cleanJobId, `source.${cleanExt}`);
+  if (!STORAGE_DIR || !fs.existsSync(localSourcePath)) {
+    return res.status(404).json({ error: "Uploaded source file is not ready." });
   }
 
-  if (!ALLOWED_EXTENSIONS.has(cleanExt)) {
-    return res.status(400).json({
-      error:
-        "Unsupported file type. Use MP3, WAV, MP4, or MKV.",
-    });
+  const sourceStats = fs.statSync(localSourcePath);
+  if (!sourceStats.isFile() || sourceStats.size <= 0) {
+    return res.status(400).json({ error: "Uploaded source file is invalid." });
   }
 
-  // Respond immediately.
-  res.status(202).json({
-    received: true,
-    jobId: cleanJobId,
-    status: "queued",
-  });
+  res.status(202).json({ received: true, jobId: cleanJobId, status: "queued" });
 
-  // Process in background.
   const callbackStatusUrl =
     typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl)
       ? new URL("/api/internal/status", statusUrl).toString()
       : new URL("/api/internal/status", NEXT_APP_URL).toString();
 
-  runPipeline(
-    cleanJobId,
-    cleanExt,
-    sourceUrl,
-    options || {},
-    callbackStatusUrl,
-    sourceDeleteUrl
-  ).catch(async (err) => {
-    console.error(
-      `[${cleanJobId}] Pipeline crashed:`,
-      err
-    );
-
-    const message =
-      err?.message ||
-      "Unknown processing error";
-
-    await pushStatus(
-      cleanJobId,
-      {
-        status: "error",
-        progress: 0,
-        message: "Processing failed",
-        error: message,
-      },
-      callbackStatusUrl
-    );
+  runPipeline(cleanJobId, cleanExt, localSourcePath, options || {}, callbackStatusUrl).catch(async (err) => {
+    console.error(`[${cleanJobId}] Pipeline crashed:`, err);
+    await pushStatus(cleanJobId, {
+      status: "error",
+      progress: 0,
+      message: "Processing failed",
+      error: err?.message || "Unknown processing error",
+    }, callbackStatusUrl);
   });
 });
 
@@ -275,10 +321,9 @@ app.post("/process", checkSecret, (req, res) => {
 async function runPipeline(
   jobId,
   ext,
-  sourceUrl,
+  sourcePath,
   options,
-  statusBaseUrl = NEXT_APP_URL,
-  sourceDeleteUrl = ""
+  statusBaseUrl = NEXT_APP_URL
 ) {
   if (!STORAGE_DIR) {
     throw new Error(
@@ -355,57 +400,6 @@ async function runPipeline(
   const reportStatus = (update) => pushStatus(jobId, update, statusBaseUrl);
 
   try {
-    // ----------------------------------------------------------
-    // Download source from Backblaze B2
-    // ----------------------------------------------------------
-
-    if (!sourceUrl) {
-      throw new Error("Source URL is required");
-    }
-
-    console.log(
-      `[${jobId}] Downloading source from Backblaze B2`
-    );
-
-    fs.mkdirSync(
-      path.dirname(sourcePath),
-      { recursive: true }
-    );
-
-    const blobResponse = await fetch(sourceUrl);
-
-    if (!blobResponse.ok || !blobResponse.body) {
-      throw new Error(
-        `Failed to download source from Backblaze B2 (HTTP ${blobResponse.status})`
-      );
-    }
-
-    await pipeline(
-      Readable.fromWeb(blobResponse.body),
-      fs.createWriteStream(sourcePath)
-    );
-
-    if (sourceDeleteUrl) {
-      try {
-        const deleteResponse = await fetch(sourceDeleteUrl, {
-          method: "DELETE",
-        });
-
-        if (!deleteResponse.ok) {
-          console.warn(
-            `[${jobId}] B2 source cleanup returned HTTP ${deleteResponse.status}`
-          );
-        } else {
-          console.log(`[${jobId}] B2 source deleted`);
-        }
-      } catch (deleteError) {
-        console.warn(
-          `[${jobId}] B2 source cleanup failed (non-fatal):`,
-          deleteError?.message || deleteError
-        );
-      }
-    }
-
     // ----------------------------------------------------------
     // Validate source
     // ----------------------------------------------------------
@@ -785,6 +779,13 @@ async function runPipeline(
       clips,
     });
 
+    try {
+      fs.rmSync(path.join(STORAGE_DIR, "uploads", jobId), { recursive: true, force: true });
+      fs.rmSync(resultsDir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      console.warn(`[${jobId}] final cleanup failed:`, cleanupError?.message || cleanupError);
+    }
+
     console.log(
       `[${jobId}] Pipeline completed successfully`
     );
@@ -800,6 +801,10 @@ async function runPipeline(
     } catch (cleanupError) {
       // Non-fatal.
     }
+
+    try {
+      fs.rmSync(path.join(STORAGE_DIR, "uploads", jobId), { recursive: true, force: true });
+    } catch {}
 
     throw err;
   }
