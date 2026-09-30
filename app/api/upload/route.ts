@@ -49,23 +49,29 @@ export async function POST(request: Request) {
       );
     }
 
+    // The job ID is already unique, so this pathname is unique.
+    // That means we do not need overwrite permissions.
     const pathname = `uploads/${jobId}/source.${ext}`;
+    const validUntil = Date.now() + 60 * 60 * 1000;
 
+    // Official Vercel signed-URL flow:
+    // 1. Server creates a narrowly-scoped PUT token.
+    // 2. Server turns it into a presigned PUT URL.
+    // 3. Browser uploads the file directly to Blob.
+    //
+    // The Blob store itself is already PRIVATE, so access/overwrite
+    // options are intentionally not added to the presign call.
     const signedToken = await issueSignedToken({
       pathname,
       operations: ["put"],
-      validUntil: Date.now() + 60 * 60 * 1000,
+      validUntil,
       maximumSizeInBytes: MAX_UPLOAD_SIZE,
     });
 
     const { presignedUrl } = await presignUrl(signedToken, {
       pathname,
       operation: "put",
-      access: "private",
-      validUntil: Date.now() + 60 * 60 * 1000,
-      maximumSizeInBytes: MAX_UPLOAD_SIZE,
-      addRandomSuffix: false,
-      allowOverwrite: true,
+      validUntil,
     });
 
     return NextResponse.json({
