@@ -13,14 +13,6 @@ const ALLOWED_EXTENSIONS = new Set([
   "mkv",
 ]);
 
-const ALLOWED_CONTENT_TYPES = [
-  "audio/mpeg",
-  "audio/wav",
-  "audio/x-wav",
-  "video/mp4",
-  "video/x-matroska",
-];
-
 export async function POST(request: Request) {
   try {
     const { isAuthenticated } = await auth();
@@ -64,7 +56,6 @@ export async function POST(request: Request) {
       operations: ["put"],
       validUntil: Date.now() + 60 * 60 * 1000,
       maximumSizeInBytes: MAX_UPLOAD_SIZE,
-      allowedContentTypes: ALLOWED_CONTENT_TYPES,
     });
 
     const { presignedUrl } = await presignUrl(signedToken, {
@@ -73,7 +64,6 @@ export async function POST(request: Request) {
       access: "private",
       validUntil: Date.now() + 60 * 60 * 1000,
       maximumSizeInBytes: MAX_UPLOAD_SIZE,
-      allowedContentTypes: ALLOWED_CONTENT_TYPES,
       addRandomSuffix: false,
       allowOverwrite: true,
     });
