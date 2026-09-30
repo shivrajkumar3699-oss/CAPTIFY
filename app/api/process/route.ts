@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const workerSecret = process.env.WORKER_SECRET;
     if (!workerUrl || !workerSecret) return NextResponse.json({ error: "Worker configuration is missing." }, { status: 500 });
 
-    const statusUrl = req.nextUrl.origin.replace(/\/+$/, "") + "/api/internal/status";
+    const statusUrl = req.nextUrl.origin.replace(/\/+$/, "");
     const workerResponse = await fetch(workerUrl.replace(/\/+$/, "") + "/process", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-worker-secret": workerSecret },
