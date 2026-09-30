@@ -395,18 +395,24 @@ export default function Home() {
   const isDone = status?.status === "done";
 
   const progress = useMemo(() => {
-    // Upload progress and processing progress are separate phases.
-    // Never mix the upload percentage into the worker percentage.
+    // ONE overall progress bar:
+    // 0–40% = browser upload
+    // 40–100% = AI processing + clip rendering
+    // The percentage never jumps backwards when upload finishes.
     if (isDone) return 100;
 
     if (isProcessing) {
-      // Never let a queued job visually sit at 0% while the worker is
-      // starting. Keep the processing UI moving until real worker progress
-      // arrives, while still preserving every real progress value.
-      return Math.max(1, Math.min(99, status?.progress ?? 1));
+      const workerProgress = Math.max(
+        1,
+        Math.min(100, status?.progress ?? 1)
+      );
+
+      return Math.round(40 + workerProgress * 0.6);
     }
 
-    return Math.max(0, Math.min(100, uploadProgress));
+    return Math.round(
+      Math.max(0, Math.min(40, uploadProgress * 0.4))
+    );
   }, [isProcessing, isDone, status?.progress, uploadProgress]);
 
   const stopPolling = useCallback(() => {
