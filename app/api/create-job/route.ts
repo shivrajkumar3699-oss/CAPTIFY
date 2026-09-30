@@ -5,7 +5,7 @@ import { createJob } from "@/lib/jobStore";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
     const { isAuthenticated, userId } = await auth();
 
@@ -16,7 +16,22 @@ export async function POST() {
       );
     }
 
-    const jobId = uuid();
+    let requestedJobId = "";
+
+    try {
+      const body = await req.json();
+      requestedJobId =
+        typeof body?.jobId === "string"
+          ? body.jobId.trim()
+          : "";
+    } catch {
+      // Empty body is allowed; generate the ID on the server.
+    }
+
+    const jobId =
+      /^[a-zA-Z0-9_-]+$/.test(requestedJobId)
+        ? requestedJobId
+        : uuid();
 
     await createJob({ userId, jobId });
 
