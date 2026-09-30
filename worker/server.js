@@ -782,6 +782,40 @@ async function runPipeline(
 }
 
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// DOWNLOAD ENDPOINT
+// ------------------------------------------------------------
+
+app.get("/download/:jobId/:filename", checkSecret, (req, res) => {
+  const jobId = String(req.params.jobId || "").trim();
+  const filename = String(req.params.filename || "").trim();
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+    return res.status(400).json({ error: "Invalid jobId" });
+  }
+
+  if (!/^clip-\\d+-(raw|edited)\\.mp4$/i.test(filename)) {
+    return res.status(400).json({ error: "Invalid filename" });
+  }
+
+  if (!STORAGE_DIR) {
+    return res.status(500).json({ error: "STORAGE_DIR is not configured" });
+  }
+
+  const resultsRoot = path.resolve(STORAGE_DIR, "results", jobId);
+  const filePath = path.resolve(resultsRoot, filename);
+
+  if (!filePath.startsWith(resultsRoot + path.sep)) {
+    return res.status(400).json({ error: "Invalid file path" });
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
+  return res.download(filePath, filename);
+});
+
 // Health check
 // ------------------------------------------------------------
 
