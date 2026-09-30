@@ -543,58 +543,32 @@ export default function Home() {
       const presignedUrl =
         uploadSetupData.presignedUrl as string;
 
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-
-        xhr.open("PUT", presignedUrl);
-        xhr.setRequestHeader(
-          "Content-Type",
-          file.type || "application/octet-stream"
-        );
-
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const nextProgress = Math.round(
-              (event.loaded / event.total) * 100
-            );
-
-            // Browser/network progress events can occasionally arrive
-            // out of order. Keep the visual progress monotonic.
-            const safeProgress = Math.max(
-              uploadProgressRef.current,
-              Math.min(99, nextProgress)
-            );
-
-            uploadProgressRef.current = safeProgress;
-            setUploadProgress(safeProgress);
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            uploadProgressRef.current = 100;
-            setUploadProgress(100);
-            resolve();
-            return;
-          }
-
-          reject(
-            new Error(
-              `Blob upload failed (HTTP ${xhr.status}).`
-            )
-          );
-        };
-
-        xhr.onerror = () => {
-          reject(new Error("Network error while uploading the file."));
-        };
-
-        xhr.onabort = () => {
-          reject(new Error("Upload was cancelled."));
-        };
-
-        xhr.send(file);
+      // Vercel Blob signed PUT URLs are designed to be consumed with
+      // a native fetch PUT. Do not add a manual Content-Type header here:
+      // the File/Blob body provides its content type to the Blob endpoint.
+      const uploadResponse = await fetch(presignedUrl, {
+        method: "PUT",
+        body: file,
       });
+
+      if (!uploadResponse.ok) {
+        let details = "";
+
+        try {
+          details = (await uploadResponse.text()).trim();
+        } catch {
+          // Ignore an unreadable error body.
+        }
+
+        throw new Error(
+          details
+            ? `Blob upload failed (HTTP ${uploadResponse.status}): ${details}`
+            : `Blob upload failed (HTTP ${uploadResponse.status}).`
+        );
+      }
+
+      uploadProgressRef.current = 100;
+      setUploadProgress(100);
 
       // Upload is finished. From this point onward the worker owns the
       // progress value, so the upload percentage must not leak into it.
