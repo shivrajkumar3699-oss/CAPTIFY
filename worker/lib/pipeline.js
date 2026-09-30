@@ -149,92 +149,56 @@ function cutRawClip(
       Number(endTime) - Number(startTime)
     );
 
+    console.log(`[cutRawClip] source=${sourcePath}`);
     console.log(
-      `[cutRawClip] source=${sourcePath}`
-    );
-
-    console.log(
-      `[cutRawClip] start=${Number(startTime).toFixed(3)} ` +
-        `duration=${duration.toFixed(3)}`
+      `[cutRawClip] start=${Number(startTime).toFixed(3)} duration=${duration.toFixed(3)}`
     );
 
     const command = ffmpeg(sourcePath)
       .setStartTime(Number(startTime))
       .setDuration(duration)
-
-      // Raw clips do not need a second full video encode.
-      // Stream-copy keeps FFmpeg memory usage low on Render's free instance.
       .outputOptions([
-        "-c",
-        "copy",
-
-        // Make timestamps start cleanly from zero.
-        "-avoid_negative_ts",
-        "make_zero",
+        "-map", "0:v:0?",
+        "-map", "0:a:0?",
+        "-c", "copy",
+        "-avoid_negative_ts", "make_zero",
+        "-movflags", "+faststart",
       ])
-
       .on("start", (commandLine) => {
-        console.log(
-          "[cutRawClip] FFmpeg command:"
-        );
+        console.log("[cutRawClip] FFmpeg command:");
         console.log(commandLine);
       })
-
       .on("stderr", (line) => {
-        // Keep useful FFmpeg diagnostics visible.
         if (
           line.includes("Error") ||
           line.includes("error") ||
           line.includes("Invalid") ||
           line.includes("failed")
         ) {
-          console.error(
-            `[cutRawClip] ${line}`
-          );
+          console.error(`[cutRawClip] ${line}`);
         }
       })
-
       .on("end", () => {
         if (!require("fs").existsSync(outputPath)) {
-          return reject(
-            new Error(
-              "FFmpeg finished but raw clip was not created"
-            )
-          );
+          return reject(new Error("FFmpeg finished but raw clip was not created"));
         }
-
-        console.log(
-          `[cutRawClip] Created: ${outputPath}`
-        );
-
+        const size = require("fs").statSync(outputPath).size;
+        if (!size) {
+          return reject(new Error("FFmpeg created an empty raw clip"));
+        }
+        console.log(`[cutRawClip] Created: ${outputPath} (${size} bytes)`);
         resolve(outputPath);
       })
-
-      .on(
-        "error",
-        (err, stdout, stderr) => {
-          console.error(
-            "[cutRawClip] FFmpeg ERROR:",
-            err.message
-          );
-
-          if (stderr) {
-            console.error(
-              "[cutRawClip] FFmpeg STDERR:"
-            );
-            console.error(stderr);
-          }
-
-          reject(err);
-        }
-      )
-
+      .on("error", (err, stdout, stderr) => {
+        console.error("[cutRawClip] FFmpeg ERROR:", err.message);
+        if (stderr) console.error("[cutRawClip] FFmpeg STDERR:", stderr);
+        reject(err);
+      })
       .save(outputPath);
 
     return command;
   });
 }
-
 // ------------------------------------------------------------
 // ASS path escaping
 // ------------------------------------------------------------
@@ -444,18 +408,14 @@ function buildEditedClip(
           assPath
         );
 
-        const command =
-          ffmpeg(rawClipPath);
+        const command = ffmpeg(rawClipPath);
 
-        // BGM is an additional input.
-        if (bgmPath) {
-          command
-            .input(bgmPath)
-            .inputOptions([
-              "-stream_loop",
-              "-1",
-            ]);
-        }
+        // Render with bounded CPU/thread usage on Render free instances.
+        command.outputOptions([
+          "-threads", "1",
+          "-filter_threads", "1",
+          "-filter_complex_threads", "1",
+        ]);
 
         const maps = bgmPath
           ? [
