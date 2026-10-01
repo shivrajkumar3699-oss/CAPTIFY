@@ -502,6 +502,34 @@ function uploadCors(req, res, next) {
   next();
 }
 
+function parseContentRange(req) {
+  const value = String(req.headers["content-range"] || "").trim();
+  const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/.exec(value);
+
+  if (!match) return null;
+
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const total = Number(match[3]);
+
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    !Number.isSafeInteger(total) ||
+    start < 0 ||
+    end < start ||
+    total <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    offset: start,
+    contentLength: end - start + 1,
+    total,
+  };
+}
+
 // ------------------------------------------------------------
 // GENERIC CHUNK UPLOAD
 // ------------------------------------------------------------
@@ -683,20 +711,29 @@ app.put(
       });
     }
 
+    const range = parseContentRange(req);
+
+    const headerTotal =
+      Number(req.headers["x-upload-total"]);
+
+    const headerOffset =
+      Number(req.headers["x-upload-offset"]);
+
     const total =
-      Number(
-        req.headers["x-upload-total"]
-      );
+      range?.total ??
+      (Number.isSafeInteger(headerTotal)
+        ? headerTotal
+        : NaN);
 
     const offset =
-      Number(
-        req.headers["x-upload-offset"]
-      );
+      range?.offset ??
+      (Number.isSafeInteger(headerOffset)
+        ? headerOffset
+        : NaN);
 
     const contentLength =
-      Number(
-        req.headers["content-length"]
-      );
+      range?.contentLength ??
+      Number(req.headers["content-length"]);
 
     if (!STORAGE_DIR) {
       return res.status(500).json({
@@ -761,20 +798,29 @@ app.put(
       });
     }
 
+    const range = parseContentRange(req);
+
+    const headerTotal =
+      Number(req.headers["x-upload-total"]);
+
+    const headerOffset =
+      Number(req.headers["x-upload-offset"]);
+
     const total =
-      Number(
-        req.headers["x-upload-total"]
-      );
+      range?.total ??
+      (Number.isSafeInteger(headerTotal)
+        ? headerTotal
+        : NaN);
 
     const offset =
-      Number(
-        req.headers["x-upload-offset"]
-      );
+      range?.offset ??
+      (Number.isSafeInteger(headerOffset)
+        ? headerOffset
+        : NaN);
 
     const contentLength =
-      Number(
-        req.headers["content-length"]
-      );
+      range?.contentLength ??
+      Number(req.headers["content-length"]);
 
     if (!STORAGE_DIR) {
       return res.status(500).json({
