@@ -148,9 +148,9 @@ async function cutRawClip(
     Number(endTime) - Number(startTime)
   );
 
-  console.log(\`[cutRawClip] source=\${sourcePath}\`);
+  console.log(`[cutRawClip] source=${sourcePath}`);
   console.log(
-    \`[cutRawClip] start=\${Number(startTime).toFixed(3)} duration=\${duration.toFixed(3)}\`
+    `[cutRawClip] start=${Number(startTime).toFixed(3)} duration=${duration.toFixed(3)}`
   );
 
   const info = await getVideoInfo(sourcePath);
@@ -168,7 +168,7 @@ async function cutRawClip(
 
     if (is4KOrLarger) {
       console.log(
-        \`[cutRawClip] 4K source detected (\${info.width}x\${info.height}); creating 720x1280 low-memory intermediate\`
+        `[cutRawClip] 4K source detected (${info.width}x${info.height}); creating 720x1280 low-memory intermediate`
       );
 
       command
@@ -205,7 +205,7 @@ async function cutRawClip(
           line.includes("Invalid") ||
           line.includes("failed")
         ) {
-          console.error(\`[cutRawClip] \${line}\`);
+          console.error(`[cutRawClip] ${line}`);
         }
       })
       .on("end", () => {
@@ -221,7 +221,7 @@ async function cutRawClip(
           return reject(new Error("FFmpeg created an empty raw clip"));
         }
 
-        console.log(\`[cutRawClip] Created: \${outputPath} (\${size} bytes)\`);
+        console.log(`[cutRawClip] Created: ${outputPath} (${size} bytes)`);
         resolve(outputPath);
       })
       .on("error", (err, stdout, stderr) => {
