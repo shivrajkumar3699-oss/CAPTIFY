@@ -1706,6 +1706,7 @@ ${timeRange(
                       </div>
                     </div>
                   </div>
+                )}
 
                 {/* Primary controls */}
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
