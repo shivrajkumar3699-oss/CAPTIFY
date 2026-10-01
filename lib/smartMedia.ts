@@ -156,84 +156,26 @@ export async function trimVideoForUpload(
     );
   }
 
+  /*
+   * FINAL BROWSER-SAFE PATH:
+   *
+   * Do NOT transcode video in the browser.
+   *
+   * The previous implementation tried to configure WebCodecs/H.264 and
+   * repeatedly hit:
+   * "Unsupported configuration. Check isConfigSupported() prior to calling configure()."
+   *
+   * Mediabunny supports direct packet-copy conversion when no video
+   * transcoding options are supplied. That means the browser only trims and
+   * repackages the existing encoded video instead of touching VideoEncoder.
+   *
+   * Render will do the actual 1080x1920 normalization, captions, BGM and
+   * final encoding. This is the reliable zero-cost path.
+   */
+
   const input = createInput(file);
 
   try {
-    /*
-     * IMPORTANT:
-     * Never hard-code an H.264 WebCodecs configuration here.
-     *
-     * Chrome/Windows can report H.264 as available but reject a specific
-     * width/height/profile when VideoEncoder.configure() is called.
-     * Mediabunny provides getFirstEncodable* helpers that call the browser's
-     * isConfigSupported() with the actual requested dimensions/bitrate/fps.
-     *
-     * We deliberately prepare a lightweight 720x1280 clip for Render.
-     * This is still 9:16, dramatically smaller than 1080x1920, and keeps
-     * the free 512 MB Render worker much safer.
-     */
-    const VIDEO_WIDTH = 720;
-    const VIDEO_HEIGHT = 1280;
-    const VIDEO_FPS = 30;
-    const VIDEO_BITRATE = 2_500_000;
-
-    const outputFormat = new Mp4OutputFormat();
-
-    let videoCodec =
-      await getFirstEncodableVideoCodec(
-        outputFormat.getSupportedVideoCodecs(),
-        {
-          width: VIDEO_WIDTH,
-          height: VIDEO_HEIGHT,
-          bitrate: VIDEO_BITRATE,
-          frameRate: VIDEO_FPS,
-        },
-      );
-
-    // Some older/odd browser builds reject 720x1280 but accept a smaller
-    // vertical profile. Try one final safe fallback before giving up.
-    let outputWidth = VIDEO_WIDTH;
-    let outputHeight = VIDEO_HEIGHT;
-    let outputBitrate = VIDEO_BITRATE;
-
-    if (!videoCodec) {
-      outputWidth = 540;
-      outputHeight = 960;
-      outputBitrate = 1_800_000;
-
-      videoCodec =
-        await getFirstEncodableVideoCodec(
-          outputFormat.getSupportedVideoCodecs(),
-          {
-            width: outputWidth,
-            height: outputHeight,
-            bitrate: outputBitrate,
-            frameRate: VIDEO_FPS,
-          },
-        );
-    }
-
-    if (!videoCodec) {
-      throw new Error(
-        "Your browser cannot encode a compatible MP4 hook clip. Please use the latest Chrome or Edge.",
-      );
-    }
-
-    /*
-     * Audio is probed too. This removes the second hard-coded WebCodecs
-     * assumption (AAC) so a browser that cannot encode AAC does not reach
-     * AudioEncoder.configure() and fail later.
-     */
-    const audioCodec =
-      await getFirstEncodableAudioCodec(
-        outputFormat.getSupportedAudioCodecs(),
-        {
-          numberOfChannels: 2,
-          sampleRate: 48_000,
-          bitrate: 128_000,
-        },
-      );
-
     const output = new Output({
       format: new Mp4OutputFormat({
         fastStart: "in-memory",
@@ -246,36 +188,17 @@ export async function trimVideoForUpload(
       output,
       trim: {
         start: Math.max(0, start),
-        end: Math.max(
-          start + 0.1,
-          end,
-        ),
+        end: Math.max(start + 0.1, end),
       },
-      video: {
-        width: outputWidth,
-        height: outputHeight,
-        fit: "cover",
-        codec: videoCodec,
-        bitrate: outputBitrate,
-        frameRate: VIDEO_FPS,
-        hardwareAcceleration: "no-preference",
-        forceTranscode: true,
+
+      // CRITICAL: no video/audio codec, resize, bitrate, fps, or
+      // forceTranscode settings here. This keeps the browser on the
+      // encoded-packet copy path and completely bypasses WebCodecs encoders.
+      copy: {
+        mode: "preferred",
+        shiftTolerance: Infinity,
       },
-      audio: audioCodec
-        ? {
-            codec: audioCodec,
-            numberOfChannels: 2,
-            sampleRate: 48_000,
-            bitrate: 128_000,
-            forceTranscode: true,
-          }
-        : {
-            /*
-             * If this browser cannot encode any MP4-compatible audio codec,
-             * keep the source audio instead of trying to configure an
-             * unsupported AudioEncoder.
-             */
-          },
+
       showWarnings: false,
     });
 
@@ -290,7 +213,7 @@ export async function trimVideoForUpload(
 
     if (!conversion.isValid) {
       throw new Error(
-        "This hook cannot be prepared in your browser.",
+        "This video cannot be trimmed in your browser. Please use an MP4/MOV-compatible source.",
       );
     }
 
