@@ -408,7 +408,13 @@ function buildEditedClip(
           assPath
         );
 
-        const command = ffmpeg(rawClipPath);\n\n        // The BGM filtergraph uses [1:a], so the music file must be\n        // explicitly added as FFmpeg input #1. Without this, FFmpeg\n        // fails with: "Invalid file index 1 in filtergraph description".\n        if (bgmPath) {\n          command.input(bgmPath);\n        }
+        const command = ffmpeg(rawClipPath);
+
+        // The BGM filtergraph uses [1:a], so the music file must be
+        // explicitly added as FFmpeg input #1.
+        if (bgmPath) {
+          command.input(bgmPath);
+        }
 
         // Render with bounded CPU/thread usage on Render free instances.
         command.outputOptions([
