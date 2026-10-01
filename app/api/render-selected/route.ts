@@ -36,7 +36,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const workerUrl = process.env.WORKER_URL;
+    const workerUrl =
+      process.env.NODE_ENV === "production"
+        ? "https://captify-worker.onrender.com"
+        : process.env.WORKER_URL;
     const workerSecret = process.env.WORKER_SECRET;
 
     if (!workerUrl || !workerSecret) {
