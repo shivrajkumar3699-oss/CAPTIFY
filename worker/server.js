@@ -1619,13 +1619,55 @@ async function runSmartRender(
       // Final edited clip
       // ------------------------------------------------------
 
+      let lastRenderProgress =
+        75 +
+        Math.round(
+          (i / total) * 25
+        );
+
       await buildEditedClip(
         rawOutPath,
         assPath,
         clipDuration,
         bgmPath,
         editedOutPath,
-        framing
+        framing,
+        (ffmpegProgress) => {
+          const clipStartProgress =
+            75 +
+            (i / total) * 25;
+
+          const clipEndProgress =
+            75 +
+            ((i + 1) / total) * 25;
+
+          const renderProgress =
+            Math.round(
+              clipStartProgress +
+              (Math.max(
+                0,
+                Math.min(100, Number(ffmpegProgress) || 0)
+              ) /
+                100) *
+                (clipEndProgress - clipStartProgress)
+            );
+
+          if (
+            renderProgress >
+            lastRenderProgress
+          ) {
+            lastRenderProgress =
+              renderProgress;
+
+            void reportStatus({
+              status: "rendering",
+              progress: renderProgress,
+              message:
+                `Rendering clip ${clipNum} of ${total}`,
+              clips,
+            });
+          }
+        }
       );
 
       clips.push({
