@@ -1,6 +1,7 @@
 // worker/lib/pipeline.js
 
 const ffmpeg = require("fluent-ffmpeg");
+const fs = require("fs");
 const ffmpegPath = require("ffmpeg-static");
 
 if (ffmpegPath) {
@@ -433,7 +434,7 @@ function buildFilterGraph(
 // Edited clip
 // ------------------------------------------------------------
 
-function buildEditedClip(
+async function buildEditedClip(
   rawClipPath,
   assPath,
   clipDuration,
@@ -447,9 +448,63 @@ function buildEditedClip(
       ? "fill"
       : "fit";
 
-  return getVideoInfo(rawClipPath).then(
+  /*
+   * IMPORTANT FOR RENDER FREE:
+   * Browser uploads can contain the original 4K hook. Do not feed that
+   * 2160x3840 file directly into the caption filtergraph. First create a
+   * small 720x1280 intermediate, then run the caption render against that
+   * lightweight file. This prevents the free Render instance from being
+   * forced to keep 4K frames through ASS/filter processing.
+   */
+  let renderInputPath = rawClipPath;
+  let temporaryScaledPath = null;
+
+  const rawInfo = await getVideoInfo(rawClipPath);
+  const rawIs4KOrLarger =
+    Math.max(rawInfo.width, rawInfo.height) >= 2160;
+
+  if (rawIs4KOrLarger) {
+    temporaryScaledPath =
+      rawClipPath + ".render-720.mp4";
+
+    try {
+      if (fs.existsSync(temporaryScaledPath)) {
+        fs.unlinkSync(temporaryScaledPath);
+      }
+    } catch {}
+
+    console.log(
+      `[buildEditedClip] 4K input detected (${rawInfo.width}x${rawInfo.height}); pre-scaling to 720x1280 before caption render`
+    );
+
+    await cutRawClip(
+      rawClipPath,
+      0,
+      Number(clipDuration),
+      temporaryScaledPath
+    );
+
+    renderInputPath = temporaryScaledPath;
+  }
+
+  return getVideoInfo(renderInputPath).then(
     (info) =>
       new Promise((resolve, reject) => {
+        const cleanupTemporaryInput = () => {
+          if (!temporaryScaledPath) return;
+
+          try {
+            if (fs.existsSync(temporaryScaledPath)) {
+              fs.unlinkSync(temporaryScaledPath);
+            }
+          } catch (cleanupError) {
+            console.warn(
+              "[buildEditedClip] temporary 720p cleanup failed:",
+              cleanupError?.message || cleanupError
+            );
+          }
+        };
+
         const escapedAss =
           escapePathForFilter(assPath);
 
@@ -484,7 +539,7 @@ function buildEditedClip(
           assPath
         );
 
-        const command = ffmpeg(rawClipPath);
+        const command = ffmpeg(renderInputPath);
 
         // The BGM filtergraph uses [1:a], so the music file must be
         // explicitly added as FFmpeg input #1.
@@ -598,6 +653,7 @@ function buildEditedClip(
               `[buildEditedClip] Created: ${outputPath}`
             );
 
+            cleanupTemporaryInput();
             resolve(outputPath);
           })
 
@@ -616,6 +672,7 @@ function buildEditedClip(
                 console.error(stderr);
               }
 
+              cleanupTemporaryInput();
               reject(err);
             }
           )
