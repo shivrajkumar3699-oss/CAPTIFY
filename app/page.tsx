@@ -390,7 +390,7 @@ export default function Home() {
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const renderWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const renderWatchdogRef = useRef<number | null>(null);
 
   const isProcessing =
     status?.status === "queued" ||
