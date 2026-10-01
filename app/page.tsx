@@ -400,39 +400,61 @@ export default function Home() {
 
   const isDone = status?.status === "done";
 
-    const progress = useMemo(() => {
-  if (isDone) return 100;
-
-  if (isProcessing) {
-    return Math.max(
-      uploadProgress,
-      Math.min(
-        99,
-        Math.round(
-          35 +
-            Math.max(
-              0,
-              Math.min(
-                100,
-                status?.progress ?? 0
-              )
-            ) *
-              0.65
+  const rawProgress = isDone
+    ? 100
+    : isProcessing
+      ? Math.max(
+          uploadProgress,
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Number(status?.progress ?? 0)
+            )
+          )
         )
-      )
-    );
-  }
+      : uploadProgress;
 
-  return Math.max(
-    0,
-    Math.min(100, uploadProgress)
-  );
-}, [
-  isProcessing,
-  isDone,
-  status?.progress,
-  uploadProgress,
-]);
+  const targetProgressRef = useRef(0);
+  const [displayProgress, setDisplayProgress] = useState(0);
+
+  useEffect(() => {
+    targetProgressRef.current = Math.max(
+      targetProgressRef.current,
+      Math.max(0, Math.min(100, rawProgress))
+    );
+
+    if (isDone) {
+      targetProgressRef.current = 100;
+    }
+  }, [rawProgress, isDone]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setDisplayProgress((current) => {
+        const target = targetProgressRef.current;
+
+        if (current >= target) {
+          return current;
+        }
+
+        const remaining = target - current;
+        const step = Math.max(
+          1,
+          Math.min(4, Math.ceil(remaining / 5))
+        );
+
+        return Math.min(
+          target,
+          current + step
+        );
+      });
+    }, 2250);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const progress = displayProgress;
 
   const pollingCancelRef = useRef<(() => void) | null>(null);
   const highestProgressRef = useRef(0);
@@ -1683,50 +1705,7 @@ ${timeRange(
                             )}
                         </div>
 
-                        {uploadProgress > 0 &&
-                          uploadProgress < 100 &&
-                          !isProcessing && (
-                            <div className="mt-4 rounded-2xl border border-white/[0.07] bg-black/[0.18] p-4">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-white/35">
-                                  Uploading
-                                </span>
-                                <span className="text-sm font-black text-[#F7D002]">
-                                  {uploadProgress}%
-                                </span>
-                              </div>
 
-                              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
-                                <div
-                                  className="h-full rounded-full bg-[#F7D002] transition-all duration-200"
-                                  style={{ width: `${uploadProgress}%` }}
-                                />
-                              </div>
-
-                              <div className="mt-3 grid grid-cols-2 gap-3">
-                                <div>
-                                  <p className="text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
-                                    Approx. speed
-                                  </p>
-                                  <p className="mt-1 text-xs font-bold text-white/65">
-                                    {formatMbps(uploadSpeed)}
-                                  </p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
-                                    Time remaining
-                                  </p>
-                                  <p className="mt-1 text-xs font-bold text-white/65">
-                                    {formatEta(uploadEta)}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 {/* Primary controls */}
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -2176,6 +2155,25 @@ ${timeRange(
                       "Preparing your media..."}
                   </p>
 
+                  <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-white/[0.07] bg-black/[0.18] p-4">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
+                        Approx. speed
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-white/65">
+                        {formatMbps(uploadSpeed)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
+                        Time remaining
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-white/65">
+                        {formatEta(uploadEta)}
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.07]">
                     <div
                       className="relative h-full rounded-full bg-[#F7D002] transition-all duration-700"
@@ -2242,7 +2240,7 @@ ${timeRange(
                       key={clip.index}
                       className="group overflow-hidden rounded-[30px] border border-white/[0.09] bg-white/[0.035] shadow-[0_25px_80px_rgba(0,0,0,.3)] backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-white/[0.15]"
                     >
-                      <div className="relative aspect-video overflow-hidden bg-black">
+                      <div className="relative aspect-[9/16] overflow-hidden bg-black">
                         <video
                           src={
                             clip.editedUrl
@@ -2722,7 +2720,6 @@ function MiniStat({
     </div>
   );
 }
-
 
 
 
