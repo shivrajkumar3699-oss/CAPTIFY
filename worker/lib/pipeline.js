@@ -371,7 +371,8 @@ function buildEditedClip(
   clipDuration,
   bgmPath,
   outputPath,
-  framing
+  framing,
+  onProgress
 ) {
   const mode =
     framing === "fill"
@@ -475,6 +476,15 @@ function buildEditedClip(
               "[buildEditedClip] FFmpeg command:"
             );
             console.log(commandLine);
+            onProgress?.(0);
+          })
+          .on("progress", (progress) => {
+            const percent = Number(progress?.percent);
+            if (Number.isFinite(percent)) {
+              onProgress?.(
+                Math.max(0, Math.min(100, percent))
+              );
+            }
           })
 
           .on("stderr", (line) => {
