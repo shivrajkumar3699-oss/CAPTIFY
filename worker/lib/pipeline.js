@@ -280,8 +280,8 @@ function buildFilterGraph(
       `scale=${targetWidth}:${targetHeight}`;
   } else {
     const fit = Math.min(
-      VIDEO_WIDTH / srcW,
-      VIDEO_HEIGHT / srcH
+      targetWidth / srcW,
+      targetHeight / srcH
     );
 
     const fitW = evenRound(srcW * fit);
@@ -427,9 +427,16 @@ function buildEditedClip(
             clipDuration
           );
 
+        const is4KOrLarger =
+          Math.max(info.width, info.height) >= 2160;
+
+        const targetLabel =
+          is4KOrLarger ? "720x1280" : "1080x1920";
+
         console.log(
           `[buildEditedClip] ` +
             `source=${info.width}x${info.height} ` +
+            `target=${targetLabel} ` +
             `framing=${mode} ` +
             `bgm=${bgmPath ? "yes" : "no"} ` +
             `duration=${Number(
