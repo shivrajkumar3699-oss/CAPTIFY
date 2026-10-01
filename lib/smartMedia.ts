@@ -175,16 +175,22 @@ export async function trimVideoForUpload(
         ),
       },
       video: {
+        // Always hand Render a lightweight 1080x1920 H.264 hook.
+        // This prevents 4K source frames from reaching the 512 MB worker.
+        width: 1080,
+        height: 1920,
+        fit: "cover",
+        codec: "avc",
+        bitrate: 5_000_000,
+        frameRate: 30,
         hardwareAcceleration:
           "prefer-hardware",
+        forceTranscode: true,
       },
       audio: {
         codec: "aac",
-        bitrate: 160_000,
-      },
-      copy: {
-        mode: "preferred",
-        boundaryPolicy: "expand",
+        bitrate: 128_000,
+        forceTranscode: true,
       },
       showWarnings: false,
     });
