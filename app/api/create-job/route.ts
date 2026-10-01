@@ -35,7 +35,10 @@ export async function POST(req: Request) {
 
     await createJob({ userId, jobId });
 
-    const workerUrl = process.env.WORKER_URL;
+    const workerUrl =
+      process.env.NODE_ENV === "production"
+        ? "https://captify-worker.onrender.com"
+        : process.env.WORKER_URL;
 
     if (!workerUrl) {
       return NextResponse.json(
