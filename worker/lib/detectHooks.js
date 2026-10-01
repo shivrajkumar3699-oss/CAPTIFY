@@ -416,7 +416,7 @@ IMPORTANT:
 - Do NOT add explanations before or after the JSON.
 - Return only the JSON array.
 - Start and end times MUST be numbers.
-- Each segment should preferably be between 8 and 45 seconds.
+- Each segment MUST be between 10 and 90 seconds. Prefer the shortest complete hook that includes the setup and the payoff.
 - Do not create invalid or negative timestamps.
 
 TRANSCRIPT:
