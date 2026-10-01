@@ -35,6 +35,7 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 const PORT = Number(process.env.PORT) || 8080;
+const WORKER_INSTANCE_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const WORKER_SECRET = process.env.WORKER_SECRET;
 const STORAGE_DIR = process.env.STORAGE_DIR;
 
@@ -1882,6 +1883,8 @@ app.get(
       ok: true,
       service:
         "captify-worker",
+      instanceId:
+        WORKER_INSTANCE_ID,
     });
   }
 );
