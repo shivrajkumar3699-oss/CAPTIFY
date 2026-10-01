@@ -276,32 +276,50 @@ function buildFilterGraph(
       `scale=${fitW}:${fitH}`;
   }
 
-  const filters = [
-    // Split source video.
-    "[0:v]split=2[bgsrc][fgsrc]",
+  // Native 9:16 sources do not need a duplicated blurred background.
+  // Avoiding split/overlay greatly reduces FFmpeg memory usage on Render.
+  const sourceIsVertical =
+    Math.abs(srcW / srcH - VIDEO_WIDTH / VIDEO_HEIGHT) < 0.01;
 
-    // Blurred background.
-    `[bgsrc]` +
-      `crop=trunc(iw*0.94/2)*2:` +
-      `trunc(ih*0.94/2)*2,` +
-      `scale=270:480:` +
-      `force_original_aspect_ratio=increase,` +
-      `crop=270:480,` +
-      `gblur=sigma=8,` +
-      `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT},` +
-      `eq=brightness=-0.1` +
-      `[bg]`,
+  const filters = [];
 
-    // Main video.
-    `[fgsrc]${fgChain}[fg]`,
+  if (sourceIsVertical) {
+    filters.push(
+      `[0:v]${fgChain},` +
+        `fade=t=in:st=0:d=0.4,` +
+        `ass='${escapedAss}':shaping=complex,` +
+        `format=yuv420p[v]`
+    );
+  } else {
+    filters.push(
+      "[0:v]split=2[bgsrc][fgsrc]"
+    );
 
-    // Combine + captions.
-    `[bg][fg]` +
-      `overlay=x=(W-w)/2:y=(H-h)/2,` +
-      `fade=t=in:st=0:d=0.4,` +
-      `ass='${escapedAss}':shaping=complex,` +
-      `format=yuv420p[v]`,
-  ];
+    filters.push(
+      `[bgsrc]` +
+        `crop=trunc(iw*0.94/2)*2:` +
+        `trunc(ih*0.94/2)*2,` +
+        `scale=270:480:` +
+        `force_original_aspect_ratio=increase,` +
+        `crop=270:480,` +
+        `gblur=sigma=8,` +
+        `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT},` +
+        `eq=brightness=-0.1` +
+        `[bg]`
+    );
+
+    filters.push(
+      `[fgsrc]${fgChain}[fg]`
+    );
+
+    filters.push(
+      "[bg][fg]" +
+        `overlay=x=(W-w)/2:y=(H-h)/2,` +
+        `fade=t=in:st=0:d=0.4,` +
+        `ass='${escapedAss}':shaping=complex,` +
+        `format=yuv420p[v]`
+    );
+  }
 
   // ----------------------------------------------------------
   // Audio
