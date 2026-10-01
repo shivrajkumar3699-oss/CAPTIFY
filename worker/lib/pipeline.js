@@ -471,6 +471,12 @@ function buildEditedClip(
             "-preset",
             "ultrafast",
 
+            "-tune",
+            "zerolatency",
+
+            "-x264-params",
+            "rc-lookahead=0:ref=1:bframes=0",
+
             "-crf",
             "23",
 
