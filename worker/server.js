@@ -489,7 +489,7 @@ function uploadCors(req, res, next) {
 
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset"
+    "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset, X-Chunk-Index, X-Total-Chunks"
   );
 
   if (req.method === "OPTIONS") {
