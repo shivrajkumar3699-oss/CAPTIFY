@@ -1,20 +1,34 @@
 // worker/server.js
+
 require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
 
-const { extractAudio, transcribeWithTimestamps } = require("./lib/transcribe");
-const { detectHookSegments } = require("./lib/detectHooks");
 const {
-  getVideoDuration,
-  cutRawClip,
+  transcribeWithTimestamps,
+} = require("./lib/transcribe");
+
+const {
+  detectHookSegments,
+} = require("./lib/detectHooks");
+
+const {
   buildEditedClip,
 } = require("./lib/pipeline");
-const { buildAssCaptions } = require("./lib/captions");
-const { chooseBgmForSegment } = require("./lib/bgmMap");
-const { convertWords } = require("./lib/convertWords");
+
+const {
+  buildAssCaptions,
+} = require("./lib/captions");
+
+const {
+  chooseBgmForSegment,
+} = require("./lib/bgmMap");
+
+const {
+  convertWords,
+} = require("./lib/convertWords");
 
 const app = express();
 
@@ -23,15 +37,21 @@ app.use(express.json({ limit: "1mb" }));
 const PORT = Number(process.env.PORT) || 8080;
 const WORKER_SECRET = process.env.WORKER_SECRET;
 const STORAGE_DIR = process.env.STORAGE_DIR;
+
 const NEXT_APP_URL =
   process.env.NEXT_APP_URL || "http://localhost:3000";
 
 const BGM_DIR = path.join(__dirname, "assets", "bgm");
 
-// Active job status is kept in memory on the worker as a live source of truth.
-// The browser can read this through the protected status endpoint, while the
-// database callback remains as a durable fallback.
-const activeJobStatuses = new Map();
+// ------------------------------------------------------------
+// CONSTANTS
+// ------------------------------------------------------------
+
+const MAX_UPLOAD_SIZE = 3 * 1024 * 1024 * 1024;
+const MAX_CHUNK_SIZE = 32 * 1024 * 1024;
+
+const MAX_ANALYSIS_AUDIO_SIZE = 512 * 1024 * 1024;
+const MAX_HOOK_CLIP_SIZE = 1024 * 1024 * 1024;
 
 const ALLOWED_EXTENSIONS = new Set([
   "mp3",
@@ -40,8 +60,10 @@ const ALLOWED_EXTENSIONS = new Set([
   "mkv",
 ]);
 
+const activeJobStatuses = new Map();
+
 // ------------------------------------------------------------
-// Startup validation
+// STARTUP VALIDATION
 // ------------------------------------------------------------
 
 if (!WORKER_SECRET) {
@@ -57,7 +79,7 @@ if (!STORAGE_DIR) {
 }
 
 // ------------------------------------------------------------
-// Authentication
+// AUTHENTICATION
 // ------------------------------------------------------------
 
 function checkSecret(req, res, next) {
@@ -73,13 +95,109 @@ function checkSecret(req, res, next) {
 }
 
 // ------------------------------------------------------------
-// Push status back to Next.js
+// JOB PATHS
 // ------------------------------------------------------------
 
-async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
-  // Always update the worker's live status first. This prevents the UI from
-  // depending entirely on a remote callback while a job is actively running.
-  const previous = activeJobStatuses.get(jobId) || {};
+function getJobRoot(jobId) {
+  return path.join(
+    STORAGE_DIR || "",
+    "smart",
+    jobId
+  );
+}
+
+function getAnalysisPath(jobId) {
+  return path.join(
+    getJobRoot(jobId),
+    "analysis",
+    "audio.mp3"
+  );
+}
+
+function getHookUploadDir(jobId) {
+  return path.join(
+    getJobRoot(jobId),
+    "hooks"
+  );
+}
+
+function getHookUploadPath(jobId, clipNumber) {
+  return path.join(
+    getHookUploadDir(jobId),
+    `clip-${clipNumber}.mp4`
+  );
+}
+
+function getMetadataPath(jobId) {
+  return path.join(
+    getJobRoot(jobId),
+    "analysis.json"
+  );
+}
+
+function getResultsDir(jobId) {
+  return path.join(
+    STORAGE_DIR || "",
+    "results",
+    jobId
+  );
+}
+
+function getTmpDir(jobId) {
+  return path.join(
+    STORAGE_DIR || "",
+    "tmp",
+    `smart-${jobId}`
+  );
+}
+
+// ------------------------------------------------------------
+// METADATA HELPERS
+// ------------------------------------------------------------
+
+function saveSmartMetadata(jobId, data) {
+  const metadataPath = getMetadataPath(jobId);
+
+  fs.mkdirSync(
+    path.dirname(metadataPath),
+    { recursive: true }
+  );
+
+  fs.writeFileSync(
+    metadataPath,
+    JSON.stringify(data, null, 2),
+    "utf8"
+  );
+}
+
+function loadSmartMetadata(jobId) {
+  const metadataPath = getMetadataPath(jobId);
+
+  if (!fs.existsSync(metadataPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(
+      fs.readFileSync(metadataPath, "utf8")
+    );
+  } catch {
+    return null;
+  }
+}
+
+// ------------------------------------------------------------
+// PUSH STATUS
+// ------------------------------------------------------------
+
+async function pushStatus(
+  jobId,
+  statusUpdate,
+  statusBaseUrl = NEXT_APP_URL
+) {
+  const previous =
+    activeJobStatuses.get(jobId) || {};
+
   activeJobStatuses.set(jobId, {
     ...previous,
     jobId,
@@ -87,25 +205,36 @@ async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
   });
 
   if (!statusBaseUrl) {
-    console.error(`[${jobId}] NEXT_APP_URL is not configured`);
+    console.error(
+      `[${jobId}] NEXT_APP_URL is not configured`
+    );
     return false;
   }
 
-  const url = `${statusBaseUrl.replace(/\/+$/, "")}/api/internal/status`;
-  const payload = { jobId, ...statusUpdate };
+  const url =
+    `${statusBaseUrl.replace(/\/+$/, "")}` +
+    `/api/internal/status`;
 
-  // The UI depends on these callbacks. Retry transient Vercel/network
-  // failures so the browser cannot remain stuck while rendering succeeds.
+  const payload = {
+    jobId,
+    ...statusUpdate,
+  };
+
   for (let attempt = 1; attempt <= 3; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    const timeout = setTimeout(
+      () => controller.abort(),
+      15000
+    );
 
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-worker-secret": WORKER_SECRET || "",
+          "x-worker-secret":
+            WORKER_SECRET || "",
         },
         body: JSON.stringify(payload),
         signal: controller.signal,
@@ -117,20 +246,31 @@ async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
         return true;
       }
 
-      const body = await response.text().catch(() => "");
+      const body =
+        await response.text().catch(() => "");
+
       console.error(
-        `[${jobId}] Status callback failed (attempt ${attempt}/3): HTTP ${response.status}${body ? ` — ${body.slice(0, 300)}` : ""}`
+        `[${jobId}] Status callback failed ` +
+        `(attempt ${attempt}/3): HTTP ${response.status}` +
+        `${body ? ` — ${body.slice(0, 300)}` : ""}`
       );
     } catch (err) {
       clearTimeout(timeout);
+
       console.error(
-        `[${jobId}] Status callback failed (attempt ${attempt}/3):`,
+        `[${jobId}] Status callback failed ` +
+        `(attempt ${attempt}/3):`,
         err?.message || err
       );
     }
 
     if (attempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          1000 * attempt
+        )
+      );
     }
   }
 
@@ -141,28 +281,46 @@ async function pushStatus(jobId, statusUpdate, statusBaseUrl = NEXT_APP_URL) {
 // LIVE STATUS ENDPOINT
 // ------------------------------------------------------------
 
-app.get("/status/:jobId", checkSecret, (req, res) => {
-  const jobId = String(req.params.jobId || "").trim();
+app.get(
+  "/status/:jobId",
+  checkSecret,
+  (req, res) => {
+    const jobId =
+      String(req.params.jobId || "").trim();
 
-  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
-    return res.status(400).json({ error: "Invalid jobId" });
+    if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+      return res.status(400).json({
+        error: "Invalid jobId",
+      });
+    }
+
+    const status =
+      activeJobStatuses.get(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        error: "Job status not found",
+      });
+    }
+
+    res.set(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate"
+    );
+
+    return res.json(status);
   }
-
-  const status = activeJobStatuses.get(jobId);
-
-  if (!status) {
-    return res.status(404).json({ error: "Job status not found" });
-  }
-
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
-  return res.json(status);
-});
+);
 
 // ------------------------------------------------------------
-// SNAP
+// WORD-SAFE SEGMENT SNAP
 // ------------------------------------------------------------
 
-function snapSegmentToWords(seg, words, videoDuration) {
+function snapSegmentToWords(
+  seg,
+  words,
+  videoDuration
+) {
   let start = Number(seg.startTime);
   let end = Number(seg.endTime);
 
@@ -176,49 +334,129 @@ function snapSegmentToWords(seg, words, videoDuration) {
 
   const PRE_ROLL = 0.12;
   const TAIL = 0.35;
-  const MIN_LENGTH = 5;
+  const MIN_LENGTH = 10;
+  const MAX_LENGTH = 90;
 
-  // Find first word that overlaps the requested start.
-  const firstWord = words.find(
-    (w) => Number(w.end) > start
+  const safeDuration =
+    Number.isFinite(videoDuration) &&
+    videoDuration > 0
+      ? videoDuration
+      : Infinity;
+
+  start = Math.max(0, start);
+  end = Math.min(
+    safeDuration,
+    end
   );
 
-  if (
-    firstWord &&
-    Number(firstWord.start) < end - MIN_LENGTH
-  ) {
-    start = Math.max(
-      0,
-      Number(firstWord.start) - PRE_ROLL
+  // ----------------------------------------------------------
+  // Snap start to the first overlapping word
+  // ----------------------------------------------------------
+
+  if (Array.isArray(words) && words.length) {
+    const firstWord = words.find(
+      (w) =>
+        Number(w.end) > start &&
+        Number.isFinite(Number(w.start))
     );
+
+    if (firstWord) {
+      start = Math.max(
+        0,
+        Number(firstWord.start) - PRE_ROLL
+      );
+    }
+
+    // --------------------------------------------------------
+    // Snap end to the final overlapping word
+    // --------------------------------------------------------
+
+    let lastWord = null;
+
+    for (
+      let i = words.length - 1;
+      i >= 0;
+      i--
+    ) {
+      const word = words[i];
+
+      if (
+        Number.isFinite(Number(word.start)) &&
+        Number(word.start) < end
+      ) {
+        lastWord = word;
+        break;
+      }
+    }
+
+    if (lastWord) {
+      end =
+        Number(lastWord.end) +
+        TAIL;
+    }
   }
 
-  // Find the last word that starts before requested end.
-  let lastWord = null;
+  end = Math.min(
+    safeDuration,
+    end
+  );
 
-  for (let i = words.length - 1; i >= 0; i--) {
-    if (Number(words[i].start) < end) {
-      lastWord = words[i];
-      break;
+  // ----------------------------------------------------------
+  // Guarantee minimum 10 seconds
+  // ----------------------------------------------------------
+
+  if (end - start < MIN_LENGTH) {
+    const needed =
+      MIN_LENGTH - (end - start);
+
+    const roomAfter =
+      safeDuration - end;
+
+    const extendAfter =
+      Math.min(
+        needed,
+        Math.max(0, roomAfter)
+      );
+
+    end += extendAfter;
+
+    const remaining =
+      MIN_LENGTH - (end - start);
+
+    if (remaining > 0) {
+      const extendBefore =
+        Math.min(
+          remaining,
+          start
+        );
+
+      start -= extendBefore;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Guarantee maximum 90 seconds
+  // ----------------------------------------------------------
+
+  if (end - start > MAX_LENGTH) {
+    end =
+      start + MAX_LENGTH;
+
+    if (end > safeDuration) {
+      end = safeDuration;
+      start =
+        Math.max(
+          0,
+          end - MAX_LENGTH
+        );
     }
   }
 
   if (
-    lastWord &&
-    Number(lastWord.end) + TAIL >
-      start + MIN_LENGTH
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    end <= start
   ) {
-    end =
-      Number(lastWord.end) +
-      TAIL;
-  }
-
-  end = Math.min(
-    end,
-    videoDuration
-  );
-
-  if (end - start < 1) {
     return seg;
   }
 
@@ -230,285 +468,507 @@ function snapSegmentToWords(seg, words, videoDuration) {
 }
 
 // ------------------------------------------------------------
-// DIRECT CHUNKED UPLOAD
+// UPLOAD CORS
 // ------------------------------------------------------------
 
-const MAX_UPLOAD_SIZE = 3 * 1024 * 1024 * 1024;
-const MAX_CHUNK_SIZE = 32 * 1024 * 1024;
-
 function uploadCors(req, res, next) {
-  // Upload endpoint is intentionally unauthenticated so the browser can
-  // stream multi-GB chunks directly to Render without exposing WORKER_SECRET.
-  // The jobId is a cryptographically random UUID created by the authenticated app.
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "PUT, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "*"
+  );
+
+  res.setHeader(
+    "Vary",
+    "Origin"
+  );
+
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "PUT, OPTIONS"
+  );
+
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset"
   );
 
-  if (req.method === "OPTIONS") return res.sendStatus(204);
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
   next();
 }
 
-app.options("/upload/:jobId/:ext", uploadCors);
+// ------------------------------------------------------------
+// GENERIC CHUNK UPLOAD
+// ------------------------------------------------------------
 
-app.put("/upload/:jobId/:ext", uploadCors, async (req, res) => {
-  const jobId = String(req.params.jobId || "").trim();
-  const ext = String(req.params.ext || "").trim().toLowerCase();
+function pipelineRequest(
+  req,
+  destination
+) {
+  return new Promise(
+    (resolve, reject) => {
+      req.on("error", reject);
+      destination.on("error", reject);
 
-  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) return res.status(400).json({ error: "Invalid jobId." });
-  if (!ALLOWED_EXTENSIONS.has(ext)) return res.status(400).json({ error: "Unsupported file type." });
+      destination.on(
+        "finish",
+        resolve
+      );
 
-  const total = Number(req.headers["x-upload-total"]);
-  const offset = Number(req.headers["x-upload-offset"]);
-  const contentLength = Number(req.headers["content-length"]);
+      req.pipe(destination);
+    }
+  );
+}
+
+async function handleChunkUpload({
+  req,
+  res,
+  filePath,
+  total,
+  offset,
+  contentLength,
+  maxTotalSize,
+}) {
+  if (
+    !Number.isSafeInteger(total) ||
+    total <= 0 ||
+    total > maxTotalSize
+  ) {
+    return res.status(400).json({
+      error: "Invalid upload total size.",
+    });
+  }
 
   if (
-    !Number.isSafeInteger(total) || total <= 0 || total > MAX_UPLOAD_SIZE ||
-    !Number.isSafeInteger(offset) || offset < 0 ||
-    !Number.isSafeInteger(contentLength) || contentLength <= 0 ||
-    contentLength > MAX_CHUNK_SIZE || offset + contentLength > total
+    !Number.isSafeInteger(offset) ||
+    offset < 0
   ) {
-    return res.status(400).json({ error: "Invalid upload chunk." });
+    return res.status(400).json({
+      error: "Invalid upload offset.",
+    });
   }
 
-  const range = String(req.headers["content-range"] || "");
-  const expectedRange = `bytes ${offset}-${offset + contentLength - 1}/${total}`;
+  if (
+    !Number.isSafeInteger(contentLength) ||
+    contentLength <= 0 ||
+    contentLength > MAX_CHUNK_SIZE
+  ) {
+    return res.status(400).json({
+      error: "Invalid upload chunk.",
+    });
+  }
+
+  if (
+    offset + contentLength > total
+  ) {
+    return res.status(400).json({
+      error: "Upload chunk exceeds total size.",
+    });
+  }
+
+  const range =
+    String(
+      req.headers["content-range"] || ""
+    );
+
+  const expectedRange =
+    `bytes ${offset}-${offset + contentLength - 1}/${total}`;
+
   if (range !== expectedRange) {
-    return res.status(400).json({ error: "Invalid Content-Range.", expected: expectedRange });
+    return res.status(400).json({
+      error: "Invalid Content-Range.",
+      expected: expectedRange,
+    });
   }
 
-  if (!STORAGE_DIR) return res.status(500).json({ error: "STORAGE_DIR is not configured." });
-
-  const sourcePath = path.join(STORAGE_DIR, "uploads", jobId, `source.${ext}`);
-  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(
+    path.dirname(filePath),
+    { recursive: true }
+  );
 
   try {
-    if (offset === 0 && !fs.existsSync(sourcePath)) {
-      const fd = fs.openSync(sourcePath, "w");
-      try { fs.ftruncateSync(fd, total); } finally { fs.closeSync(fd); }
-    } else if (!fs.existsSync(sourcePath)) {
-      return res.status(409).json({ error: "Upload must start with the first chunk." });
+    if (
+      offset === 0 &&
+      !fs.existsSync(filePath)
+    ) {
+      const fd =
+        fs.openSync(
+          filePath,
+          "w"
+        );
+
+      try {
+        fs.ftruncateSync(
+          fd,
+          total
+        );
+      } finally {
+        fs.closeSync(fd);
+      }
+    } else if (
+      !fs.existsSync(filePath)
+    ) {
+      return res.status(409).json({
+        error:
+          "Upload must start with the first chunk.",
+      });
     }
 
-    const writeStream = fs.createWriteStream(sourcePath, { flags: "r+", start: offset });
-    await pipelineRequest(req, writeStream);
+    const writeStream =
+      fs.createWriteStream(
+        filePath,
+        {
+          flags: "r+",
+          start: offset,
+        }
+      );
 
-    const complete = offset + contentLength === total;
-    return res.status(complete ? 201 : 204).json(
-      complete ? { ok: true, complete: true, bytes: total } : undefined
+    await pipelineRequest(
+      req,
+      writeStream
     );
-  } catch (error) {
-    console.error(`[upload:${jobId}] Chunk failed:`, error?.message || error);
-    return res.status(500).json({ error: "Upload chunk failed." });
-  }
-});
 
-function pipelineRequest(req, destination) {
-  return new Promise((resolve, reject) => {
-    req.on("error", reject);
-    destination.on("error", reject);
-    destination.on("finish", resolve);
-    req.pipe(destination);
-  });
+    const complete =
+      offset + contentLength === total;
+
+    if (complete) {
+      return res.status(201).json({
+        ok: true,
+        complete: true,
+        bytes: total,
+      });
+    }
+
+    return res.sendStatus(204);
+  } catch (error) {
+    console.error(
+      "Chunk upload failed:",
+      error?.message || error
+    );
+
+    return res.status(500).json({
+      error: "Upload chunk failed.",
+    });
+  }
 }
 
 // ------------------------------------------------------------
-// PROCESS ENDPOINT
+// SMART AUDIO UPLOAD
 // ------------------------------------------------------------
 
-app.post("/process", checkSecret, (req, res) => {
-  const { jobId, ext, sourcePath, options, statusUrl } = req.body || {};
+app.options(
+  "/upload-analysis/:jobId",
+  uploadCors
+);
 
-  if (!jobId || !ext || !sourcePath) {
-    return res.status(400).json({ error: "jobId, ext, and sourcePath are required" });
-  }
-
-  const cleanJobId = String(jobId).trim();
-  const cleanExt = String(ext).trim().toLowerCase();
-  const cleanSourcePath = String(sourcePath).trim();
-
-  if (!/^[a-zA-Z0-9_-]+$/.test(cleanJobId)) return res.status(400).json({ error: "Invalid jobId" });
-  if (!ALLOWED_EXTENSIONS.has(cleanExt)) return res.status(400).json({ error: "Unsupported file type." });
-
-  const expectedSource = `uploads/${cleanJobId}/source.${cleanExt}`;
-  if (cleanSourcePath !== expectedSource) return res.status(400).json({ error: "Invalid sourcePath" });
-
-  const localSourcePath = path.join(STORAGE_DIR || "", "uploads", cleanJobId, `source.${cleanExt}`);
-  if (!STORAGE_DIR || !fs.existsSync(localSourcePath)) {
-    return res.status(404).json({ error: "Uploaded source file is not ready." });
-  }
-
-  const sourceStats = fs.statSync(localSourcePath);
-  if (!sourceStats.isFile() || sourceStats.size <= 0) {
-    return res.status(400).json({ error: "Uploaded source file is invalid." });
-  }
-
-  res.status(202).json({ received: true, jobId: cleanJobId, status: "queued" });
-
-  // Pass the site origin to pushStatus(). pushStatus() itself appends
-  // /api/internal/status. Passing the endpoint here would create the old
-  // /api/internal/status/api/internal/status bug.
-  const callbackStatusUrl =
-    typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl)
-      ? statusUrl.replace(/\/+$/, "")
-      : NEXT_APP_URL.replace(/\/+$/, "");
-
-  runPipeline(cleanJobId, cleanExt, localSourcePath, options || {}, callbackStatusUrl).catch(async (err) => {
-    console.error(`[${cleanJobId}] Pipeline crashed:`, err);
-    await pushStatus(cleanJobId, {
-      status: "error",
-      progress: 0,
-      message: "Processing failed",
-      error: err?.message || "Unknown processing error",
-    }, callbackStatusUrl);
-  });
-});
-
-// ------------------------------------------------------------
-// MAIN PIPELINE
-// ------------------------------------------------------------
-
-async function runPipeline(
-  jobId,
-  ext,
-  sourcePath,
-  options,
-  statusBaseUrl = NEXT_APP_URL
-) {
-  if (!STORAGE_DIR) {
-    throw new Error(
-      "STORAGE_DIR is not configured"
-    );
-  }
-
-  const resultsDir = path.join(
-    STORAGE_DIR,
-    "results",
-    jobId
-  );
-
-  const tmpDir = path.join(
-    STORAGE_DIR,
-    "tmp",
-    jobId
-  );
-
-  fs.mkdirSync(
-    resultsDir,
-    { recursive: true }
-  );
-
-  fs.mkdirSync(
-    tmpDir,
-    { recursive: true }
-  );
-
-  const clipCount = Math.max(
-    1,
-    Math.min(
-      7,
-      Number(
-        options.clipCount ||
-        options.numClips ||
-        6
-      ) || 6
-    )
-  );
-
-  const useBgm = Boolean(
-    options.useBgm ||
-    options.bgm
-  );
-
-  const captionColor =
-    typeof options.captionColor === "string" &&
-    options.captionColor.trim()
-      ? options.captionColor.trim()
-      : "#FFD700";
-
-  const framing =
-    options.framing === "fill"
-      ? "fill"
-      : "fit";
-
-  const audioLanguage =
-    options.audioLanguage ||
-    "auto";
-
-  const captionLanguage =
-    options.captionLanguage ||
-    "same";
-
-  const usedBgmFiles = new Set();
-  const reportStatus = (update) => pushStatus(jobId, update, statusBaseUrl);
-
-  try {
-    // ----------------------------------------------------------
-    // Validate source
-    // ----------------------------------------------------------
-
-    if (!fs.existsSync(sourcePath)) {
-      throw new Error(
-        `Source file not found at ${sourcePath}`
-      );
-    }
-
-    const sourceStats =
-      fs.statSync(sourcePath);
+app.put(
+  "/upload-analysis/:jobId",
+  uploadCors,
+  async (req, res) => {
+    const jobId =
+      String(
+        req.params.jobId || ""
+      ).trim();
 
     if (
-      !sourceStats.isFile() ||
-      sourceStats.size <= 0
+      !/^[a-zA-Z0-9_-]+$/.test(jobId)
     ) {
-      throw new Error(
-        "Uploaded source file is empty or invalid"
-      );
+      return res.status(400).json({
+        error: "Invalid jobId.",
+      });
     }
 
-    console.log(
-      `[${jobId}] Source: ${sourcePath}`
-    );
+    const total =
+      Number(
+        req.headers["x-upload-total"]
+      );
 
-    console.log(
-      `[${jobId}] Size: ${sourceStats.size} bytes`
-    );
+    const offset =
+      Number(
+        req.headers["x-upload-offset"]
+      );
 
-    // ----------------------------------------------------------
-    // Step 1: Extract audio
-    // ----------------------------------------------------------
+    const contentLength =
+      Number(
+        req.headers["content-length"]
+      );
 
-    await reportStatus({
-      status: "transcribing",
-      progress: 5,
-      message: "Extracting audio",
+    if (!STORAGE_DIR) {
+      return res.status(500).json({
+        error:
+          "STORAGE_DIR is not configured.",
+      });
+    }
+
+    return handleChunkUpload({
+      req,
+      res,
+      filePath:
+        getAnalysisPath(jobId),
+      total,
+      offset,
+      contentLength,
+      maxTotalSize:
+        MAX_ANALYSIS_AUDIO_SIZE,
+    });
+  }
+);
+
+// ------------------------------------------------------------
+// SMART SELECTED CLIP UPLOAD
+// ------------------------------------------------------------
+
+app.options(
+  "/upload-clip/:jobId/:clipNumber",
+  uploadCors
+);
+
+app.put(
+  "/upload-clip/:jobId/:clipNumber",
+  uploadCors,
+  async (req, res) => {
+    const jobId =
+      String(
+        req.params.jobId || ""
+      ).trim();
+
+    const clipNumber =
+      Number(
+        req.params.clipNumber
+      );
+
+    if (
+      !/^[a-zA-Z0-9_-]+$/.test(jobId)
+    ) {
+      return res.status(400).json({
+        error: "Invalid jobId.",
+      });
+    }
+
+    if (
+      !Number.isInteger(clipNumber) ||
+      clipNumber < 1 ||
+      clipNumber > 7
+    ) {
+      return res.status(400).json({
+        error:
+          "clipNumber must be between 1 and 7.",
+      });
+    }
+
+    const total =
+      Number(
+        req.headers["x-upload-total"]
+      );
+
+    const offset =
+      Number(
+        req.headers["x-upload-offset"]
+      );
+
+    const contentLength =
+      Number(
+        req.headers["content-length"]
+      );
+
+    if (!STORAGE_DIR) {
+      return res.status(500).json({
+        error:
+          "STORAGE_DIR is not configured.",
+      });
+    }
+
+    return handleChunkUpload({
+      req,
+      res,
+      filePath:
+        getHookUploadPath(
+          jobId,
+          clipNumber
+        ),
+      total,
+      offset,
+      contentLength,
+      maxTotalSize:
+        MAX_HOOK_CLIP_SIZE,
+    });
+  }
+);
+
+// ------------------------------------------------------------
+// SMART ANALYSIS
+//
+// Browser sends ONLY the small extracted MP3.
+// Original video never reaches this endpoint.
+// ------------------------------------------------------------
+
+app.post(
+  "/analyze",
+  checkSecret,
+  (req, res) => {
+    const {
+      jobId,
+      options,
+      statusUrl,
+      videoDuration,
+    } = req.body || {};
+
+    const cleanJobId =
+      String(jobId || "").trim();
+
+    if (
+      !/^[a-zA-Z0-9_-]+$/.test(
+        cleanJobId
+      )
+    ) {
+      return res.status(400).json({
+        error: "Invalid jobId.",
+      });
+    }
+
+    const duration =
+      Number(videoDuration);
+
+    if (
+      !Number.isFinite(duration) ||
+      duration <= 0
+    ) {
+      return res.status(400).json({
+        error:
+          "videoDuration is required.",
+      });
+    }
+
+    const analysisPath =
+      getAnalysisPath(cleanJobId);
+
+    if (
+      !fs.existsSync(analysisPath)
+    ) {
+      return res.status(404).json({
+        error:
+          "Analysis audio has not been uploaded yet.",
+      });
+    }
+
+    const stats =
+      fs.statSync(analysisPath);
+
+    if (
+      !stats.isFile() ||
+      stats.size <= 0
+    ) {
+      return res.status(400).json({
+        error:
+          "Analysis audio is invalid.",
+      });
+    }
+
+    res.status(202).json({
+      received: true,
+      jobId: cleanJobId,
+      status: "queued",
     });
 
-    const audioPath = path.join(
-      tmpDir,
-      "audio.mp3"
+    const callbackStatusUrl =
+      typeof statusUrl === "string" &&
+      /^https?:\/\//i.test(statusUrl)
+        ? statusUrl.replace(
+            /\/+$/,
+            ""
+          )
+        : NEXT_APP_URL.replace(
+            /\/+$/,
+            ""
+          );
+
+    runSmartAnalysis(
+      cleanJobId,
+      analysisPath,
+      options || {},
+      duration,
+      callbackStatusUrl
+    ).catch(
+      async (err) => {
+        console.error(
+          `[${cleanJobId}] Smart analysis crashed:`,
+          err
+        );
+
+        await pushStatus(
+          cleanJobId,
+          {
+            status: "error",
+            progress: 0,
+            message:
+              "Analysis failed",
+            error:
+              err?.message ||
+              "Unknown analysis error",
+          },
+          callbackStatusUrl
+        );
+      }
+    );
+  }
+);
+
+// ------------------------------------------------------------
+// SMART ANALYSIS PIPELINE
+// ------------------------------------------------------------
+
+async function runSmartAnalysis(
+  jobId,
+  analysisPath,
+  options,
+  videoDuration,
+  statusBaseUrl
+) {
+  const reportStatus =
+    (update) =>
+      pushStatus(
+        jobId,
+        update,
+        statusBaseUrl
+      );
+
+  try {
+    const clipCount = Math.max(
+      1,
+      Math.min(
+        7,
+        Number(
+          options.clipCount ||
+          options.numClips ||
+          6
+        ) || 6
+      )
     );
 
-    await extractAudio(
-      sourcePath,
-      audioPath
-    );
+    const audioLanguage =
+      options.audioLanguage ||
+      "auto";
 
-    // ----------------------------------------------------------
-    // Step 2: Transcribe
-    // ----------------------------------------------------------
+    const captionLanguage =
+      options.captionLanguage ||
+      "same";
+
+    // --------------------------------------------------------
+    // 1. Transcription
+    // --------------------------------------------------------
 
     await reportStatus({
       status: "transcribing",
-      progress: 20,
-      message: "Transcribing audio",
+      progress: 10,
+      message:
+        "Transcribing extracted audio",
     });
 
     const transcription =
       await transcribeWithTimestamps(
-        audioPath,
+        analysisPath,
         audioLanguage
       );
 
@@ -519,20 +979,20 @@ async function runPipeline(
       transcription?.words;
 
     if (
-      !Array.isArray(words) ||
-      words.length === 0
-    ) {
-      throw new Error(
-        "Transcription returned no words. Check the audio and GROQ_API_KEY."
-      );
-    }
-
-    if (
       typeof text !== "string" ||
       !text.trim()
     ) {
       throw new Error(
         "Transcription returned no transcript text."
+      );
+    }
+
+    if (
+      !Array.isArray(words) ||
+      words.length === 0
+    ) {
+      throw new Error(
+        "Transcription returned no words. Check the audio and GROQ_API_KEY."
       );
     }
 
@@ -542,9 +1002,9 @@ async function runPipeline(
       `${words.length} words`
     );
 
-    // ----------------------------------------------------------
-    // Step 2.5: Caption language conversion
-    // ----------------------------------------------------------
+    // --------------------------------------------------------
+    // 2. Caption language conversion
+    // --------------------------------------------------------
 
     let captionWords = words;
 
@@ -553,9 +1013,9 @@ async function runPipeline(
     ) {
       await reportStatus({
         status: "transcribing",
-        progress: 30,
+        progress: 25,
         message:
-          "Converting captions to selected language",
+          "Preparing caption language",
       });
 
       captionWords =
@@ -566,46 +1026,26 @@ async function runPipeline(
         );
 
       if (
-        !Array.isArray(captionWords) ||
+        !Array.isArray(
+          captionWords
+        ) ||
         captionWords.length === 0
       ) {
         throw new Error(
-          "Caption conversion returned no words"
+          "Caption conversion returned no words."
         );
       }
     }
 
-    // ----------------------------------------------------------
-    // Step 3: Video duration
-    // ----------------------------------------------------------
-
-    const videoDuration =
-      await getVideoDuration(
-        sourcePath
-      );
-
-    if (
-      !Number.isFinite(videoDuration) ||
-      videoDuration <= 0
-    ) {
-      throw new Error(
-        "Could not determine source video duration"
-      );
-    }
-
-    console.log(
-      `[${jobId}] Video duration: ${videoDuration.toFixed(2)}s`
-    );
-
-    // ----------------------------------------------------------
-    // Step 4: Hook detection
-    // ----------------------------------------------------------
+    // --------------------------------------------------------
+    // 3. Hook detection
+    // --------------------------------------------------------
 
     await reportStatus({
       status: "detecting_hooks",
       progress: 40,
       message:
-        "Finding the best hooks",
+        "Finding complete hooks",
     });
 
     const segments =
@@ -621,54 +1061,428 @@ async function runPipeline(
       segments.length === 0
     ) {
       throw new Error(
-        "No hook segments were detected"
+        "No hook segments were detected."
       );
     }
 
-    const selectedSegments =
-      segments.slice(
-        0,
-        clipCount
+    // --------------------------------------------------------
+    // 4. Snap + enforce 10–90 seconds
+    // --------------------------------------------------------
+
+    const normalizedSegments =
+      segments
+        .map((segment) =>
+          snapSegmentToWords(
+            segment,
+            words,
+            videoDuration
+          )
+        )
+        .filter((segment) => {
+          const start =
+            Number(
+              segment.startTime
+            );
+
+          const end =
+            Number(
+              segment.endTime
+            );
+
+          const duration =
+            end - start;
+
+          return (
+            Number.isFinite(start) &&
+            Number.isFinite(end) &&
+            duration >= 10 &&
+            duration <= 90 &&
+            start >= 0 &&
+            end <= videoDuration
+          );
+        })
+        .slice(
+          0,
+          clipCount
+        );
+
+    if (
+      normalizedSegments.length === 0
+    ) {
+      throw new Error(
+        "No valid hooks between 10 and 90 seconds were found."
+      );
+    }
+
+    console.log(
+      `[${jobId}] Smart hooks detected:`,
+      normalizedSegments.map(
+        (segment, index) => ({
+          index: index + 1,
+          title: segment.title,
+          start:
+            Number(
+              segment.startTime
+            ).toFixed(2),
+          end:
+            Number(
+              segment.endTime
+            ).toFixed(2),
+        })
+      )
+    );
+
+    // --------------------------------------------------------
+    // 5. Persist small analysis metadata
+    // --------------------------------------------------------
+
+    saveSmartMetadata(
+      jobId,
+      {
+        jobId,
+        videoDuration,
+        clipCount,
+        options,
+        transcript: text,
+        words,
+        captionWords,
+        segments:
+          normalizedSegments,
+        createdAt:
+          new Date().toISOString(),
+      }
+    );
+
+    await reportStatus({
+      status: "detecting_hooks",
+      progress: 50,
+      message:
+        `${normalizedSegments.length} complete hooks found`,
+      clips:
+        normalizedSegments.map(
+          (segment, index) => ({
+            index,
+            title:
+              segment.title ||
+              `Clip ${index + 1}`,
+            hookReason:
+              segment.hookReason ||
+              "",
+            startTime:
+              Number(
+                segment.startTime
+              ),
+            endTime:
+              Number(
+                segment.endTime
+              ),
+            rawUrl: "",
+            editedUrl: "",
+          })
+        ),
+    });
+
+    console.log(
+      `[${jobId}] Smart analysis completed`
+    );
+  } catch (err) {
+    throw err;
+  }
+}
+
+// ------------------------------------------------------------
+// SMART RENDER SELECTED CLIPS
+//
+// Browser sends ONLY the selected hook MP4 files.
+// Original 3 GB source is never needed here.
+// ------------------------------------------------------------
+
+app.post(
+  "/render-selected",
+  checkSecret,
+  (req, res) => {
+    const {
+      jobId,
+      selectedSegments,
+      options,
+      statusUrl,
+    } = req.body || {};
+
+    const cleanJobId =
+      String(jobId || "").trim();
+
+    if (
+      !/^[a-zA-Z0-9_-]+$/.test(
+        cleanJobId
+      )
+    ) {
+      return res.status(400).json({
+        error: "Invalid jobId.",
+      });
+    }
+
+    const metadata =
+      loadSmartMetadata(
+        cleanJobId
       );
 
-    // ----------------------------------------------------------
-    // Step 5: Render clips
-    // ----------------------------------------------------------
+    if (!metadata) {
+      return res.status(404).json({
+        error:
+          "Smart analysis data not found. Analyze the audio first.",
+      });
+    }
 
-    const clips = [];
+    if (
+      !Array.isArray(
+        selectedSegments
+      ) ||
+      selectedSegments.length === 0
+    ) {
+      return res.status(400).json({
+        error:
+          "selectedSegments are required.",
+      });
+    }
 
+    const segments =
+      selectedSegments
+        .slice(0, 7)
+        .map((segment, index) => ({
+          index,
+          title:
+            String(
+              segment?.title ||
+              metadata.segments?.[index]
+                ?.title ||
+              `Clip ${index + 1}`
+            ),
+          hookReason:
+            String(
+              segment?.hookReason ||
+              metadata.segments?.[index]
+                ?.hookReason ||
+              ""
+            ),
+          startTime:
+            Number(
+              segment?.startTime ??
+              metadata.segments?.[index]
+                ?.startTime
+            ),
+          endTime:
+            Number(
+              segment?.endTime ??
+              metadata.segments?.[index]
+                ?.endTime
+            ),
+        }));
+
+    for (
+      let i = 0;
+      i < segments.length;
+      i++
+    ) {
+      const clipPath =
+        getHookUploadPath(
+          cleanJobId,
+          i + 1
+        );
+
+      if (
+        !fs.existsSync(clipPath)
+      ) {
+        return res.status(400).json({
+          error:
+            `Selected clip ${i + 1} has not been uploaded.`,
+        });
+      }
+
+      const stats =
+        fs.statSync(clipPath);
+
+      if (
+        !stats.isFile() ||
+        stats.size <= 0
+      ) {
+        return res.status(400).json({
+          error:
+            `Selected clip ${i + 1} is invalid.`,
+        });
+      }
+    }
+
+    res.status(202).json({
+      received: true,
+      jobId: cleanJobId,
+      status: "queued",
+    });
+
+    const callbackStatusUrl =
+      typeof statusUrl === "string" &&
+      /^https?:\/\//i.test(statusUrl)
+        ? statusUrl.replace(
+            /\/+$/,
+            ""
+          )
+        : NEXT_APP_URL.replace(
+            /\/+$/,
+            ""
+          );
+
+    runSmartRender(
+      cleanJobId,
+      segments,
+      metadata,
+      options || metadata.options || {},
+      callbackStatusUrl
+    ).catch(
+      async (err) => {
+        console.error(
+          `[${cleanJobId}] Smart render crashed:`,
+          err
+        );
+
+        await pushStatus(
+          cleanJobId,
+          {
+            status: "error",
+            progress: 0,
+            message:
+              "Rendering failed",
+            error:
+              err?.message ||
+              "Unknown rendering error",
+          },
+          callbackStatusUrl
+        );
+      }
+    );
+  }
+);
+
+// ------------------------------------------------------------
+// SMART RENDER PIPELINE
+// ------------------------------------------------------------
+
+async function runSmartRender(
+  jobId,
+  selectedSegments,
+  metadata,
+  options,
+  statusBaseUrl
+) {
+  const resultsDir =
+    getResultsDir(jobId);
+
+  const tmpDir =
+    getTmpDir(jobId);
+
+  fs.mkdirSync(
+    resultsDir,
+    { recursive: true }
+  );
+
+  fs.mkdirSync(
+    tmpDir,
+    { recursive: true }
+  );
+
+  const captionColor =
+    typeof options.captionColor === "string" &&
+    options.captionColor.trim()
+      ? options.captionColor.trim()
+      : "#FFD700";
+
+  const framing =
+    options.framing === "fill"
+      ? "fill"
+      : "fit";
+
+  const useBgm =
+    Boolean(
+      options.useBgm ||
+      options.bgm
+    );
+
+  const captionWords =
+    Array.isArray(
+      metadata.captionWords
+    )
+      ? metadata.captionWords
+      : metadata.words;
+
+  const usedBgmFiles =
+    new Set();
+
+  const reportStatus =
+    (update) =>
+      pushStatus(
+        jobId,
+        update,
+        statusBaseUrl
+      );
+
+  try {
     const total =
       selectedSegments.length;
+
+    const clips = [];
 
     for (
       let i = 0;
       i < total;
       i++
     ) {
-      const originalSegment =
+      const segment =
         selectedSegments[i];
 
-      const seg =
-        snapSegmentToWords(
-          originalSegment,
-          words,
-          videoDuration
+      const clipNum =
+        i + 1;
+
+      const uploadedClipPath =
+        getHookUploadPath(
+          jobId,
+          clipNum
         );
 
-      const clipNum = i + 1;
+      if (
+        !fs.existsSync(
+          uploadedClipPath
+        )
+      ) {
+        throw new Error(
+          `Selected hook clip ${clipNum} is missing.`
+        );
+      }
 
-      const baseProgress =
-        45 +
-        Math.round(
-          (i / total) * 50
+      const startTime =
+        Number(
+          segment.startTime
         );
 
-      await reportStatus({
-        status: "rendering",
-        progress: baseProgress,
-        message:
-          `Rendering clip ${clipNum} of ${total}`,
-      });
+      const endTime =
+        Number(
+          segment.endTime
+        );
+
+      const clipDuration =
+        endTime - startTime;
+
+      if (
+        !Number.isFinite(
+          startTime
+        ) ||
+        !Number.isFinite(
+          endTime
+        ) ||
+        clipDuration < 10 ||
+        clipDuration > 90
+      ) {
+        throw new Error(
+          `Clip ${clipNum} has an invalid duration. Hooks must be 10–90 seconds.`
+        );
+      }
 
       const rawFilename =
         `clip-${clipNum}-raw.mp4`;
@@ -694,60 +1508,67 @@ async function runPipeline(
           `captions-${clipNum}.ass`
         );
 
-      const clipDuration =
-        Math.max(
-          0.1,
-          Number(seg.endTime) -
-            Number(seg.startTime)
-        );
+      await reportStatus({
+        status: "rendering",
+        progress:
+          50 +
+          Math.round(
+            (i / total) * 45
+          ),
+        message:
+          `Rendering clip ${clipNum} of ${total}`,
+      });
 
       console.log(
-        `[${jobId}] clip ${clipNum}: ` +
-        `${Number(seg.startTime).toFixed(1)}s - ` +
-        `${Number(seg.endTime).toFixed(1)}s ` +
-        `(${clipDuration.toFixed(1)}s) ` +
-        `"${seg.title || ""}"`
+        `[${jobId}] smart clip ${clipNum}: ` +
+        `${startTime.toFixed(2)}s - ` +
+        `${endTime.toFixed(2)}s ` +
+        `(${clipDuration.toFixed(2)}s) ` +
+        `"${segment.title || ""}"`
       );
 
-      // --------------------------------------------------------
-      // Raw clip
-      // --------------------------------------------------------
+      // ------------------------------------------------------
+      // The uploaded browser-trimmed hook becomes the raw clip.
+      // NO original 3 GB video is used here.
+      // ------------------------------------------------------
 
-      await cutRawClip(
-        sourcePath,
-        Number(seg.startTime),
-        Number(seg.endTime),
+      fs.copyFileSync(
+        uploadedClipPath,
         rawOutPath
       );
 
-      // --------------------------------------------------------
+      // ------------------------------------------------------
       // Captions
-      // --------------------------------------------------------
+      //
+      // captionWords still contain ORIGINAL VIDEO timestamps.
+      // buildAssCaptions shifts them relative to startTime.
+      // ------------------------------------------------------
 
       buildAssCaptions(
         captionWords,
-        Number(seg.startTime),
-        Number(seg.endTime),
+        startTime,
+        endTime,
         captionColor,
         assPath
       );
 
-      // --------------------------------------------------------
+      // ------------------------------------------------------
       // BGM
-      // --------------------------------------------------------
+      // ------------------------------------------------------
 
-      const bgmPath = useBgm
-        ? chooseBgmForSegment(
-            seg.title,
-            seg.hookReason,
-            usedBgmFiles,
-            BGM_DIR
-          )
-        : null;
+      const bgmPath =
+        useBgm
+          ? chooseBgmForSegment(
+              segment.title,
+              segment.hookReason,
+              usedBgmFiles,
+              BGM_DIR
+            )
+          : null;
 
-      // --------------------------------------------------------
-      // Edited clip
-      // --------------------------------------------------------
+      // ------------------------------------------------------
+      // Final edited clip
+      // ------------------------------------------------------
 
       await buildEditedClip(
         rawOutPath,
@@ -761,42 +1582,35 @@ async function runPipeline(
       clips.push({
         index: i,
         title:
-          seg.title ||
+          segment.title ||
           `Clip ${clipNum}`,
-
         hookReason:
-          seg.hookReason ||
+          segment.hookReason ||
           "",
-
-        startTime:
-          Number(seg.startTime),
-
-        endTime:
-          Number(seg.endTime),
-
+        startTime,
+        endTime,
         rawUrl:
           `/api/download/${jobId}/${rawFilename}`,
-
         editedUrl:
           `/api/download/${jobId}/${editedFilename}`,
       });
 
-      // Give frontend a little more precise progress.
       await reportStatus({
         status: "rendering",
         progress:
-          45 +
+          50 +
           Math.round(
-            ((i + 1) / total) * 50
+            ((i + 1) / total) * 45
           ),
         message:
           `Clip ${clipNum} of ${total} completed`,
+        clips,
       });
     }
 
-    // ----------------------------------------------------------
-    // Step 6: Cleanup temporary files
-    // ----------------------------------------------------------
+    // --------------------------------------------------------
+    // Cleanup temporary files
+    // --------------------------------------------------------
 
     try {
       fs.rmSync(
@@ -807,15 +1621,36 @@ async function runPipeline(
         }
       );
     } catch (cleanupError) {
-      console.error(
-        `[${jobId}] tmp cleanup failed (non-fatal):`,
-        cleanupError.message
+      console.warn(
+        `[${jobId}] smart tmp cleanup failed:`,
+        cleanupError?.message ||
+          cleanupError
       );
     }
 
-    // ----------------------------------------------------------
-    // Step 7: Done
-    // ----------------------------------------------------------
+    // --------------------------------------------------------
+    // Keep results, delete uploaded analysis + hook inputs
+    // --------------------------------------------------------
+
+    try {
+      fs.rmSync(
+        getJobRoot(jobId),
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    } catch (cleanupError) {
+      console.warn(
+        `[${jobId}] smart input cleanup failed:`,
+        cleanupError?.message ||
+          cleanupError
+      );
+    }
+
+    // --------------------------------------------------------
+    // DONE
+    // --------------------------------------------------------
 
     await reportStatus({
       status: "done",
@@ -825,22 +1660,8 @@ async function runPipeline(
       clips,
     });
 
-    // Keep rendered results available so the browser can preview/download
-    // the clips after the job reaches 100%. Source uploads are still removed.
-    try {
-      fs.rmSync(path.join(STORAGE_DIR, "uploads", jobId), {
-        recursive: true,
-        force: true,
-      });
-    } catch (cleanupError) {
-      console.warn(
-        `[${jobId}] source cleanup failed:`,
-        cleanupError?.message || cleanupError
-      );
-    }
-
     console.log(
-      `[${jobId}] Pipeline completed successfully`
+      `[${jobId}] Smart pipeline completed successfully`
     );
   } catch (err) {
     try {
@@ -851,12 +1672,6 @@ async function runPipeline(
           force: true,
         }
       );
-    } catch (cleanupError) {
-      // Non-fatal.
-    }
-
-    try {
-      fs.rmSync(path.join(STORAGE_DIR, "uploads", jobId), { recursive: true, force: true });
     } catch {}
 
     throw err;
@@ -864,64 +1679,143 @@ async function runPipeline(
 }
 
 // ------------------------------------------------------------
+// LEGACY PROCESS ENDPOINT
+//
+// Kept so the old flow does not instantly break while the new
+// browser smart-flow is being wired into app/page.tsx.
+// ------------------------------------------------------------
+
+app.post(
+  "/process",
+  checkSecret,
+  (req, res) => {
+    return res.status(410).json({
+      error:
+        "Legacy full-source processing is disabled. Use the smart analysis and selected-clip rendering flow.",
+    });
+  }
+);
+
 // ------------------------------------------------------------
 // DOWNLOAD ENDPOINT
 // ------------------------------------------------------------
 
-app.get("/download/:jobId/:filename", checkSecret, (req, res) => {
-  const jobId = String(req.params.jobId || "").trim();
-  const filename = String(req.params.filename || "").trim();
+app.get(
+  "/download/:jobId/:filename",
+  checkSecret,
+  (req, res) => {
+    const jobId =
+      String(
+        req.params.jobId || ""
+      ).trim();
 
-  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
-    return res.status(400).json({ error: "Invalid jobId" });
+    const filename =
+      String(
+        req.params.filename || ""
+      ).trim();
+
+    if (
+      !/^[a-zA-Z0-9_-]+$/.test(
+        jobId
+      )
+    ) {
+      return res.status(400).json({
+        error: "Invalid jobId",
+      });
+    }
+
+    if (
+      !/^clip-\d+-(raw|edited)\.mp4$/i.test(
+        filename
+      )
+    ) {
+      return res.status(400).json({
+        error: "Invalid filename",
+      });
+    }
+
+    if (!STORAGE_DIR) {
+      return res.status(500).json({
+        error:
+          "STORAGE_DIR is not configured",
+      });
+    }
+
+    const resultsRoot =
+      path.resolve(
+        STORAGE_DIR,
+        "results",
+        jobId
+      );
+
+    const filePath =
+      path.resolve(
+        resultsRoot,
+        filename
+      );
+
+    if (
+      !filePath.startsWith(
+        resultsRoot + path.sep
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          "Invalid file path",
+      });
+    }
+
+    if (
+      !fs.existsSync(filePath)
+    ) {
+      return res.status(404).json({
+        error: "File not found",
+      });
+    }
+
+    return res.download(
+      filePath,
+      filename
+    );
   }
+);
 
-  if (!/^clip-\d+-(raw|edited)\.mp4$/i.test(filename)) {
-    return res.status(400).json({ error: "Invalid filename" });
-  }
-
-  if (!STORAGE_DIR) {
-    return res.status(500).json({ error: "STORAGE_DIR is not configured" });
-  }
-
-  const resultsRoot = path.resolve(STORAGE_DIR, "results", jobId);
-  const filePath = path.resolve(resultsRoot, filename);
-
-  if (!filePath.startsWith(resultsRoot + path.sep)) {
-    return res.status(400).json({ error: "Invalid file path" });
-  }
-
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: "File not found" });
-  }
-
-  return res.download(filePath, filename);
-});
-
-// Health check
+// ------------------------------------------------------------
+// HEALTH CHECK
 // ------------------------------------------------------------
 
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    service: "captify-worker",
-  });
-});
+app.get(
+  "/health",
+  (req, res) => {
+    res.json({
+      ok: true,
+      service:
+        "captify-worker",
+    });
+  }
+);
 
 // ------------------------------------------------------------
-// Start worker
+// START WORKER
 // ------------------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(
-    `Captify worker listening on port ${PORT}`
-  );
+app.listen(
+  PORT,
+  () => {
+    console.log(
+      `Captify worker listening on port ${PORT}`
+    );
 
-  console.log(
-    `STORAGE_DIR = ${STORAGE_DIR}`
-  );
+    console.log(
+      `STORAGE_DIR = ${STORAGE_DIR}`
+    );
 
-  console.log(
-    `NEXT_APP_URL = ${NEXT_APP_URL}`
-  );
-});
+    console.log(
+      `NEXT_APP_URL = ${NEXT_APP_URL}`
+    );
+
+    console.log(
+      "SMART FLOW = browser audio extraction + selected hook uploads"
+    );
+  }
+);

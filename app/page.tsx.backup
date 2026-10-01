@@ -83,7 +83,7 @@ function formatTime(seconds: number) {
 }
 
 function timeRange(start: number, end: number) {
-  return `${formatTime(start)} - ${formatTime(end)}`;
+  return `${formatTime(start)} — ${formatTime(end)}`;
 }
 
 function clipLength(start: number, end: number) {
@@ -362,7 +362,7 @@ export default function Home() {
   const [captionLanguage, setCaptionLanguage] = useState("same");
   const [captionColor, setCaptionColor] = useState("#FFE600");
 
-  // ONLY 1-7 CLIPS.
+  // ONLY 1–7 CLIPS.
   // Default = 6.
   const [numClips, setNumClips] = useState(6);
 
@@ -487,16 +487,20 @@ export default function Home() {
           Math.min(100, Number(data.progress) || 0)
         );
 
-        highestProgressRef.current = Math.max(
-          highestProgressRef.current,
-          incomingProgress
-        );
+        if (incomingProgress < highestProgressRef.current) {
+          setStatus((current) =>
+            current
+              ? {
+                  ...current,
+                  message: data.message || current.message,
+                }
+              : data
+          );
+          return;
+        }
 
-        setStatus((current) => ({
-          ...(current || data),
-          ...data,
-          progress: highestProgressRef.current,
-        }));
+        highestProgressRef.current = incomingProgress;
+        setStatus(data);
       } catch (err) {
         console.error(err);
       }
@@ -590,6 +594,7 @@ export default function Home() {
     setUploadEta(0);
 
     try {
+      const extension = getExtension(file.name);
       const newJobId = crypto.randomUUID();
 
       setJobId(newJobId);
@@ -657,197 +662,211 @@ export default function Home() {
         const MAX_RETRIES = 3;
 
         const totalBytes = uploadFile.size;
-
-        if (!totalBytes) {
-          throw new Error(
-            "Upload file is empty."
-          );
-        }
-
         const chunkCount = Math.ceil(
           totalBytes / CHUNK_SIZE
         );
 
-        for (
-          let index = 0;
-          index < chunkCount;
-          index++
-        ) {
-          const start =
-            index * CHUNK_SIZE;
+        const uploaded =
+          new Array<number>(chunkCount).fill(0);
 
-          const end = Math.min(
-            start + CHUNK_SIZE,
-            totalBytes
-          );
-
-          const chunk =
-            uploadFile.slice(
-              start,
-              end,
-              uploadFile.type ||
-                "application/octet-stream"
+        const updateProgress = () => {
+          const totalUploaded =
+            uploaded.reduce(
+              (sum, value) => sum + value,
+              0
             );
 
-          let attempt = 0;
+          const ratio =
+            totalBytes > 0
+              ? totalUploaded / totalBytes
+              : 1;
 
-          while (true) {
-            try {
-              await new Promise<void>(
-                (resolve, reject) => {
-                  const xhr =
-                    new XMLHttpRequest();
-
-                  xhr.open(
-                    "PUT",
-                    targetUrl,
-                    true
-                  );
-
-                  xhr.timeout = 120000;
-
-                  xhr.setRequestHeader(
-                    "Content-Type",
-                    uploadFile.type ||
-                      "application/octet-stream"
-                  );
-
-                  xhr.setRequestHeader(
-                    "Content-Range",
-                    `bytes ${start}-${end - 1}/${totalBytes}`
-                  );
-
-                  xhr.setRequestHeader(
-                    "X-Chunk-Index",
-                    String(index)
-                  );
-
-                  xhr.setRequestHeader(
-                    "X-Total-Chunks",
-                    String(chunkCount)
-                  );
-
-                  xhr.onload = () => {
-                    if (
-                      xhr.status >= 200 &&
-                      xhr.status < 300
-                    ) {
-                      resolve();
-                      return;
-                    }
-
-                    reject(
-                      new Error(
-                        `Upload failed (HTTP ${xhr.status}).`
-                      )
-                    );
-                  };
-
-                  xhr.onerror = () => {
-                    reject(
-                      new Error(
-                        "Upload connection failed."
-                      )
-                    );
-                  };
-
-                  xhr.ontimeout = () => {
-                    reject(
-                      new Error(
-                        "Upload request timed out."
-                      )
-                    );
-                  };
-
-                  xhr.onabort = () => {
-                    reject(
-                      new Error(
-                        "Upload request was aborted."
-                      )
-                    );
-                  };
-
-                  xhr.upload.onprogress =
-                    (event) => {
-                      if (
-                        !event.lengthComputable
-                      ) {
-                        return;
-                      }
-
-                      const chunkProgress =
-                        event.loaded /
-                        event.total;
-
-                      const overallProgress =
-                        index /
-                          chunkCount +
-                        chunkProgress /
-                          chunkCount;
-
-                      const progress =
-                        progressStart +
-                        overallProgress *
-                          (progressEnd -
-                            progressStart);
-
-                      setUploadProgress(
-                        Math.max(
-                          progressStart,
-                          Math.min(
-                            progressEnd,
-                            progress
-                          )
-                        )
-                      );
-                    };
-
-                  xhr.send(chunk);
-                }
-              );
-
-              break;
-            } catch (error) {
-              if (
-                attempt >= MAX_RETRIES
-              ) {
-                throw error instanceof Error
-                  ? error
-                  : new Error(
-                      "Upload connection failed after several retries."
-                    );
-              }
-
-              attempt += 1;
-
-              await new Promise(
-                (resolve) =>
-                  setTimeout(
-                    resolve,
-                    1000 * attempt
-                  )
-              );
-            }
-          }
-
-          const completedProgress =
+          const next =
             progressStart +
-            ((index + 1) /
-              chunkCount) *
-              (progressEnd -
-                progressStart);
+            ratio *
+              (progressEnd - progressStart);
 
           setUploadProgress(
             Math.max(
-              progressStart,
-              Math.min(
-                progressEnd,
-                completedProgress
-              )
+              uploadProgressRef.current,
+              Math.round(next)
             )
           );
-        }
+
+          uploadProgressRef.current =
+            Math.max(
+              uploadProgressRef.current,
+              Math.round(next)
+            );
+        };
+
+        const uploadChunk = (
+          index: number
+        ) =>
+          new Promise<void>(
+            (resolve, reject) => {
+              const start =
+                index * CHUNK_SIZE;
+
+              const end = Math.min(
+                totalBytes,
+                start + CHUNK_SIZE
+              );
+
+              const blob =
+                uploadFile.slice(start, end);
+
+              let attempt = 0;
+
+              const send = () => {
+                const xhr =
+                  new XMLHttpRequest();
+
+                xhr.open(
+                  "PUT",
+                  targetUrl,
+                  true
+                );
+
+                xhr.setRequestHeader(
+                  "Content-Type",
+                  uploadFile.type ||
+                    "application/octet-stream"
+                );
+
+                xhr.setRequestHeader(
+                  "Content-Range",
+                  `bytes ${start}-${end - 1}/${totalBytes}`
+                );
+
+                xhr.setRequestHeader(
+                  "X-Upload-Total",
+                  String(totalBytes)
+                );
+
+                xhr.setRequestHeader(
+                  "X-Upload-Offset",
+                  String(start)
+                );
+
+                xhr.upload.onprogress =
+                  (event) => {
+                    if (
+                      event.lengthComputable
+                    ) {
+                      uploaded[index] =
+                        Math.min(
+                          blob.size,
+                          event.loaded
+                        );
+
+                      updateProgress();
+                    }
+                  };
+
+                xhr.onload = () => {
+                  if (
+                    xhr.status >= 200 &&
+                    xhr.status < 300
+                  ) {
+                    uploaded[index] =
+                      blob.size;
+
+                    updateProgress();
+                    resolve();
+                    return;
+                  }
+
+                  if (
+                    attempt <
+                    MAX_RETRIES
+                  ) {
+                    attempt += 1;
+
+                    setTimeout(
+                      send,
+                      500 * attempt
+                    );
+
+                    return;
+                  }
+
+                  reject(
+                    new Error(
+                      `Upload failed (HTTP ${xhr.status}).`
+                    )
+                  );
+                };
+
+                xhr.onerror = () => {
+                  if (
+                    attempt <
+                    MAX_RETRIES
+                  ) {
+                    attempt += 1;
+
+                    setTimeout(
+                      send,
+                      500 * attempt
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        "Upload connection failed after several retries."
+                      )
+                    );
+                  }
+                };
+
+                xhr.onabort = () => {
+                  reject(
+                    new Error(
+                      "Upload was cancelled."
+                    )
+                  );
+                };
+
+                xhr.send(blob);
+              };
+
+              send();
+            }
+          );
+
+        await uploadChunk(0);
+
+        let nextChunk = 1;
+
+        const worker = async () => {
+          while (true) {
+            const index = nextChunk++;
+
+            if (index >= chunkCount) {
+              return;
+            }
+
+            await uploadChunk(index);
+          }
+        };
+
+        await Promise.all(
+          Array.from(
+            {
+              length: Math.min(
+                4,
+                Math.max(
+                  0,
+                  chunkCount - 1
+                )
+              ),
+            },
+            () => worker()
+          )
+        );
+
+        updateProgress();
       };
+
       /*
        * STEP 1
        * Read the original file locally.
@@ -879,7 +898,7 @@ export default function Home() {
       const analysisAudio =
         await extractSpeechAudio(
           file,
-          (value: number) => {
+          (value) => {
             const progress =
               Math.round(value * 20);
 
@@ -1098,7 +1117,7 @@ export default function Home() {
             file,
             segment.startTime,
             segment.endTime,
-            (value: number) => {
+            (value) => {
               const progress =
                 50 +
                 ((i + value) /
@@ -1245,14 +1264,284 @@ export default function Home() {
     }
   };
 
+      const createResponse = await createResponsePromise;
+
+      if (!createResponse.ok) {
+        let message = "Could not create the processing job.";
+
+        try {
+          const data = await createResponse.json();
+
+          if (
+            typeof data.error === "string" &&
+            data.error.trim()
+          ) {
+            message = data.error;
+          }
+        } catch {
+          // Keep the fallback message if the response is not JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      const createData =
+        await createResponse.json();
+
+      const confirmedJobId =
+        createData.jobId as string;
+
+      if (confirmedJobId !== newJobId) {
+        throw new Error("Job ID mismatch. Please try again.");
+      }
+
+      const uploadUrlBase =
+      typeof createData.uploadUrlBase === "string"
+        ? createData.uploadUrlBase
+        : "";
+
+    if (!uploadUrlBase) {
+      throw new Error("Could not prepare the video upload.");
+    }
+
+    const pathname = `uploads/${newJobId}/source.${extension}`;
+    const uploadUrl = `${uploadUrlBase}/${extension}`;
+
+      const CHUNK_SIZE = 16 * 1024 * 1024;
+      const PARALLEL_UPLOADS = 4;
+      const MAX_RETRIES = 3;
+      const totalBytes = file.size;
+
+      uploadStatsRef.current = {
+        startedAt: Date.now(),
+        lastSampleAt: Date.now(),
+        lastSampleBytes: 0,
+        samples: [{ time: Date.now(), bytes: 0 }],
+      };
+
+      const chunkCount = Math.ceil(totalBytes / CHUNK_SIZE);
+      const uploaded = new Array<number>(chunkCount).fill(0);
+
+      const updateUploadStats = (totalUploaded: number) => {
+        const now = Date.now();
+        const stats = uploadStatsRef.current;
+        const elapsed = Math.max(0.001, (now - stats.startedAt) / 1000);
+
+        if (now - stats.lastSampleAt >= 900) {
+          stats.samples.push({ time: now, bytes: totalUploaded });
+          stats.samples = stats.samples.filter((sample) => now - sample.time <= 8000);
+          stats.lastSampleAt = now;
+          stats.lastSampleBytes = totalUploaded;
+        }
+
+        const recent = stats.samples.length >= 2
+          ? stats.samples[0]
+          : { time: stats.startedAt, bytes: 0 };
+
+        const recentSeconds = Math.max(0.5, (now - recent.time) / 1000);
+        const recentBytes = Math.max(0, totalUploaded - recent.bytes);
+        const bytesPerSecond = recentBytes / recentSeconds;
+
+        const fallbackSpeed = totalUploaded / elapsed;
+        const speed = bytesPerSecond > 0 ? bytesPerSecond : fallbackSpeed;
+
+        const remaining = Math.max(0, totalBytes - totalUploaded);
+        const eta = speed > 0 ? remaining / speed : 0;
+
+        // Keep the displayed values stable. Calculate continuously, but only
+        // refresh the visible speed/ETA every 2.5 seconds using the recent
+        // rolling average. This avoids distracting rapid number changes.
+        const displayed = displayedUploadStatsRef.current;
+        if (
+          now - displayed.lastUpdateAt >= 2500 ||
+          displayed.lastUpdateAt === 0 ||
+          totalUploaded >= totalBytes
+        ) {
+          displayed.speed = speed;
+          displayed.eta = eta;
+          displayed.lastUpdateAt = now;
+
+          setUploadSpeed(speed);
+          setUploadEta(eta);
+        }
+
+        // XHR retries can emit a fresh progress event starting at 0.
+        // Never let that make the upload percentage move backwards.
+        const nextProgress = Math.min(
+          100,
+          Math.round((totalUploaded / totalBytes) * 100)
+        );
+
+        uploadProgressRef.current = Math.max(
+          uploadProgressRef.current,
+          nextProgress
+        );
+
+        setUploadProgress(uploadProgressRef.current);
+      };
+
+      const uploadChunk = (index: number) =>
+        new Promise<void>((resolve, reject) => {
+          const start = index * CHUNK_SIZE;
+          const end = Math.min(totalBytes, start + CHUNK_SIZE);
+          const blob = file.slice(start, end);
+          let attempt = 0;
+
+          const send = () => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("PUT", uploadUrl, true);
+            xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+            xhr.setRequestHeader("Content-Range", `bytes ${start}-${end - 1}/${totalBytes}`);
+            xhr.setRequestHeader("X-Upload-Total", String(totalBytes));
+            xhr.setRequestHeader("X-Upload-Offset", String(start));
+
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                uploaded[index] = Math.min(blob.size, event.loaded);
+                updateUploadStats(uploaded.reduce((sum, value) => sum + value, 0));
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                uploaded[index] = blob.size;
+                updateUploadStats(uploaded.reduce((sum, value) => sum + value, 0));
+                resolve();
+                return;
+              }
+
+              if (attempt < MAX_RETRIES) {
+                attempt += 1;
+                setTimeout(send, 500 * attempt);
+                return;
+              }
+
+              reject(new Error(`Upload chunk failed (HTTP ${xhr.status}).`));
+            };
+
+            xhr.onerror = () => {
+              if (attempt < MAX_RETRIES) {
+                attempt += 1;
+                setTimeout(send, 500 * attempt);
+              } else {
+                reject(new Error("Upload connection failed after several retries."));
+              }
+            };
+
+            xhr.onabort = () => reject(new Error("Upload was cancelled."));
+            xhr.send(blob);
+          };
+
+          send();
+        });
+
+      // Send the first chunk alone so the worker can safely create the
+      // destination file. The remaining chunks then upload in parallel.
+      await uploadChunk(0);
+
+      let nextChunk = 1;
+      const worker = async () => {
+        while (true) {
+          const index = nextChunk++;
+          if (index >= chunkCount) return;
+          await uploadChunk(index);
+        }
+      };
+
+      await Promise.all(
+        Array.from(
+          { length: Math.min(PARALLEL_UPLOADS, Math.max(0, chunkCount - 1)) },
+          () => worker()
+        )
+      );
+
+      setUploadProgress(100);
+      setUploadSpeed(uploadStatsRef.current.samples.length >= 2
+        ? ((totalBytes - uploadStatsRef.current.samples[0].bytes) /
+            Math.max(0.5, (Date.now() - uploadStatsRef.current.samples[0].time) / 1000))
+        : uploadSpeed);
+      setUploadEta(0);
+      displayedUploadStatsRef.current.lastUpdateAt = Date.now();
+
+      const processResponse =
+        await fetch("/api/process", {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            jobId: newJobId,
+            ext: extension,
+            sourcePathname: pathname,
+            options: {
+              bgm,
+              captionColor,
+              // This is exactly the 1–7 slider value.
+              numClips,
+              audioLanguage:
+                videoLanguage,
+              captionLanguage,
+              framing,
+            },
+          }),
+        });
+
+      if (!processResponse.ok) {
+        let message =
+          "Could not start processing.";
+
+        try {
+          const data =
+            await processResponse.json();
+
+          message =
+            data.error || message;
+        } catch {}
+
+        throw new Error(message);
+      }
+
+      highestProgressRef.current = 1;
+      terminalStatusRef.current = false;
+
+      setStatus({
+        jobId: newJobId,
+        status: "queued",
+        progress: 1,
+        message:
+          "Job queued, waiting for worker to pick it up",
+      });
+
+      startPolling(newJobId);
+    } catch (err) {
+      console.error(err);
+
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again.";
+
+      setError(message);
+
+      setStatus((current) =>
+        current
+          ? {
+              ...current,
+              status: "error",
+              error: message,
+            }
+          : null
+      );
+    }
+  };
 
   const copyTimestamps = async (
     clip: ClipResult
   ) => {
     try {
       await navigator.clipboard.writeText(
-        `${clip.title}
-${timeRange(
+        `${clip.title}\n${timeRange(
           clip.startTime,
           clip.endTime
         )}`
@@ -1456,7 +1745,7 @@ ${timeRange(
               <div className="mt-8 flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-end">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.28em] text-[#F7D002]">
-                    CAPTIFYY - AI CAPTION STUDIO
+                    CAPTIFYY · AI CAPTION STUDIO
                   </p>
 
                   <p className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-3xl">
@@ -1493,12 +1782,12 @@ ${timeRange(
 
                   <MiniStat
                     label="Caption languages"
-                    value="EN - HI - HING"
+                    value="EN · HI · HING"
                   />
 
                   <MiniStat
                     label="Clip generation"
-                    value="1 - 7"
+                    value="1 — 7"
                   />
                 </div>
               </div>
@@ -1538,7 +1827,7 @@ ${timeRange(
                     </h2>
 
                     <p className="mt-1.5 text-sm text-white/35">
-                    MP3, WAV, MP4 or MKV - maximum 3 GB
+                      MP3, WAV, MP4 or MKV · maximum 3 GB
                     </p>
                   </div>
 
@@ -1649,7 +1938,7 @@ ${timeRange(
                                 )}
                               </span>
 
-                              <span>-</span>
+                              <span>•</span>
 
                               <span>
                                 {getExtension(
@@ -1657,7 +1946,7 @@ ${timeRange(
                                 ).toUpperCase()}
                               </span>
 
-                              <span>-</span>
+                              <span>•</span>
 
                               <span className="text-[#F7D002]/70">
                                 Ready for AI
@@ -1805,7 +2094,7 @@ ${timeRange(
                     <div className="mt-4 flex justify-between">
                       {[
                         1, 2, 3, 4, 5, 6, 7,
-                      ].map((value: number) => (
+                      ].map((value) => (
                         <button
                           key={value}
                           type="button"
@@ -1828,8 +2117,8 @@ ${timeRange(
                   </div>
 
                   <div className="mt-5 flex items-center justify-between border-t border-white/[0.06] pt-4 text-[9px] font-black uppercase tracking-[0.15em] text-white/20">
-                    <span>Minimum - 1 clip</span>
-                    <span>Maximum - 7 clips</span>
+                    <span>Minimum · 1 clip</span>
+                    <span>Maximum · 7 clips</span>
                   </div>
                 </div>
 
@@ -1838,7 +2127,7 @@ ${timeRange(
                   <GlassSelect
                     label="Framing"
                     value={framing}
-                    onChange={(value: string) =>
+                    onChange={(value) =>
                       setFraming(
                         value as
                           | "fill"
@@ -1886,7 +2175,7 @@ ${timeRange(
                     type="button"
                     onClick={() =>
                       setShowAdvanced(
-                        (value: boolean) => !value
+                        (value) => !value
                       )
                     }
                     className="flex w-full items-center justify-between px-5 py-4 text-left"
@@ -2282,7 +2571,7 @@ ${timeRange(
                               )}
 
                               <span>
-                                -
+                                •
                               </span>
 
                               {clipLength(
@@ -2722,8 +3011,3 @@ function MiniStat({
     </div>
   );
 }
-
-
-
-
-
