@@ -2036,8 +2036,9 @@ ${timeRange(
                 )}
               </div>
             </div>
+          </div>
 
-            {/* Intelligence card */}
+          {/* Intelligence card */}
             <aside className="relative overflow-hidden rounded-[36px] border border-white/[0.09] bg-white/[0.035] p-6 shadow-[0_30px_110px_rgba(0,0,0,.38)] backdrop-blur-3xl lg:p-7">
               <div className="absolute right-[-120px] top-[-120px] h-[300px] w-[300px] rounded-full bg-[#F7D002]/[0.06] blur-[90px]" />
 
