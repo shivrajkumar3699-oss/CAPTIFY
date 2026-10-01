@@ -9,6 +9,8 @@ import {
   Mp3OutputFormat,
   Mp4OutputFormat,
   Output,
+  getFirstEncodableAudioCodec,
+  getFirstEncodableVideoCodec,
 } from "mediabunny";
 import { registerMp3Encoder } from "@mediabunny/mp3-encoder";
 
@@ -157,6 +159,81 @@ export async function trimVideoForUpload(
   const input = createInput(file);
 
   try {
+    /*
+     * IMPORTANT:
+     * Never hard-code an H.264 WebCodecs configuration here.
+     *
+     * Chrome/Windows can report H.264 as available but reject a specific
+     * width/height/profile when VideoEncoder.configure() is called.
+     * Mediabunny provides getFirstEncodable* helpers that call the browser's
+     * isConfigSupported() with the actual requested dimensions/bitrate/fps.
+     *
+     * We deliberately prepare a lightweight 720x1280 clip for Render.
+     * This is still 9:16, dramatically smaller than 1080x1920, and keeps
+     * the free 512 MB Render worker much safer.
+     */
+    const VIDEO_WIDTH = 720;
+    const VIDEO_HEIGHT = 1280;
+    const VIDEO_FPS = 30;
+    const VIDEO_BITRATE = 2_500_000;
+
+    const outputFormat = new Mp4OutputFormat();
+
+    let videoCodec =
+      await getFirstEncodableVideoCodec(
+        outputFormat.getSupportedVideoCodecs(),
+        {
+          width: VIDEO_WIDTH,
+          height: VIDEO_HEIGHT,
+          bitrate: VIDEO_BITRATE,
+          frameRate: VIDEO_FPS,
+        },
+      );
+
+    // Some older/odd browser builds reject 720x1280 but accept a smaller
+    // vertical profile. Try one final safe fallback before giving up.
+    let outputWidth = VIDEO_WIDTH;
+    let outputHeight = VIDEO_HEIGHT;
+    let outputBitrate = VIDEO_BITRATE;
+
+    if (!videoCodec) {
+      outputWidth = 540;
+      outputHeight = 960;
+      outputBitrate = 1_800_000;
+
+      videoCodec =
+        await getFirstEncodableVideoCodec(
+          outputFormat.getSupportedVideoCodecs(),
+          {
+            width: outputWidth,
+            height: outputHeight,
+            bitrate: outputBitrate,
+            frameRate: VIDEO_FPS,
+          },
+        );
+    }
+
+    if (!videoCodec) {
+      throw new Error(
+        "Your browser cannot encode a compatible MP4 hook clip. Please use the latest Chrome or Edge.",
+      );
+    }
+
+    /*
+     * Audio is probed too. This removes the second hard-coded WebCodecs
+     * assumption (AAC) so a browser that cannot encode AAC does not reach
+     * AudioEncoder.configure() and fail later.
+     */
+    const audioCodec =
+      await getFirstEncodableAudioCodec(
+        outputFormat.getSupportedAudioCodecs(),
+        {
+          numberOfChannels: 2,
+          sampleRate: 48_000,
+          bitrate: 128_000,
+        },
+      );
+
     const output = new Output({
       format: new Mp4OutputFormat({
         fastStart: "in-memory",
@@ -175,27 +252,30 @@ export async function trimVideoForUpload(
         ),
       },
       video: {
-        // Always hand Render a lightweight 1080x1920 H.264 hook.
-        // This prevents 4K source frames from reaching the 512 MB worker.
-        width: 1080,
-        height: 1920,
+        width: outputWidth,
+        height: outputHeight,
         fit: "cover",
-        codec: "avc",
-        bitrate: 5_000_000,
-        frameRate: 30,
-        // Prefer the software WebCodecs path. Some Windows/Chrome GPU
-        // combinations advertise H.264 support but fail when the hardware
-        // encoder/decoder is actually configured.
-        // This avoids the "Unsupported configuration. Check
-        // isConfigSupported() prior to calling configure()" failure.
-        hardwareAcceleration: "prefer-software",
+        codec: videoCodec,
+        bitrate: outputBitrate,
+        frameRate: VIDEO_FPS,
+        hardwareAcceleration: "no-preference",
         forceTranscode: true,
       },
-      audio: {
-        codec: "aac",
-        bitrate: 128_000,
-        forceTranscode: true,
-      },
+      audio: audioCodec
+        ? {
+            codec: audioCodec,
+            numberOfChannels: 2,
+            sampleRate: 48_000,
+            bitrate: 128_000,
+            forceTranscode: true,
+          }
+        : {
+            /*
+             * If this browser cannot encode any MP4-compatible audio codec,
+             * keep the source audio instead of trying to configure an
+             * unsupported AudioEncoder.
+             */
+          },
       showWarnings: false,
     });
 
