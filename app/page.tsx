@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -2155,6 +2154,7 @@ ${timeRange(
                       "Preparing your media..."}
                   </p>
 
+                  {(uploadSpeed > 0 || uploadEta > 0) && (
                   <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-white/[0.07] bg-black/[0.18] p-4">
                     <div>
                       <p className="text-[9px] font-black uppercase tracking-[0.12em] text-white/20">
@@ -2173,6 +2173,9 @@ ${timeRange(
                       </p>
                     </div>
                   </div>
+
+                  )}
+
 
                   <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.07]">
                     <div
@@ -2720,7 +2723,6 @@ function MiniStat({
     </div>
   );
 }
-
 
 
 
