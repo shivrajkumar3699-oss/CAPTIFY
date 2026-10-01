@@ -656,17 +656,19 @@ export default function Home() {
           ? createData.uploadUrlBase
           : "";
 
-      if (!uploadUrlBase) {
+      const workerBase =
+        process.env.NODE_ENV === "production"
+          ? "https://captify-worker.onrender.com"
+          : uploadUrlBase.replace(
+              /\/upload\/[^/]+\/?$/,
+              ""
+            );
+
+      if (!workerBase) {
         throw new Error(
           "Could not prepare the worker upload."
         );
       }
-
-      const workerBase =
-        uploadUrlBase.replace(
-          /\/upload\/[^/]+\/?$/,
-          ""
-        );
 
       const uploadChunks = async (
         targetUrl: string,
@@ -674,7 +676,7 @@ export default function Home() {
         progressStart: number,
         progressEnd: number
       ) => {
-        const CHUNK_SIZE = 16 * 1024 * 1024;
+        const CHUNK_SIZE = 8 * 1024 * 1024;
         const MAX_RETRIES = 3;
 
         const totalBytes = uploadFile.size;
@@ -757,9 +759,12 @@ export default function Home() {
                       return;
                     }
 
+                    const responseBody =
+                      String(xhr.responseText || "").trim();
+
                     reject(
                       new Error(
-                        `Upload failed (HTTP ${xhr.status}).`
+                        `Upload failed (HTTP ${xhr.status})${responseBody ? `: ${responseBody.slice(0, 500)}` : "."}`
                       )
                     );
                   };
