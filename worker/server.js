@@ -43,82 +43,41 @@ const NEXT_APP_URL =
 
 const BGM_DIR = path.join(__dirname, "assets", "bgm");
 
-// ------------------------------------------------------------
-// CONSTANTS
-// ------------------------------------------------------------
-
 const MAX_UPLOAD_SIZE = 3 * 1024 * 1024 * 1024;
 const MAX_CHUNK_SIZE = 32 * 1024 * 1024;
-
 const MAX_ANALYSIS_AUDIO_SIZE = 512 * 1024 * 1024;
 const MAX_HOOK_CLIP_SIZE = 1024 * 1024 * 1024;
 
-const ALLOWED_EXTENSIONS = new Set([
-  "mp3",
-  "wav",
-  "mp4",
-  "mkv",
-]);
-
 const activeJobStatuses = new Map();
 
-// ------------------------------------------------------------
-// STARTUP VALIDATION
-// ------------------------------------------------------------
-
 if (!WORKER_SECRET) {
-  console.warn(
-    "WARNING: WORKER_SECRET is not configured."
-  );
+  console.warn("WARNING: WORKER_SECRET is not configured.");
 }
 
 if (!STORAGE_DIR) {
-  console.warn(
-    "WARNING: STORAGE_DIR is not configured."
-  );
+  console.warn("WARNING: STORAGE_DIR is not configured.");
 }
-
-// ------------------------------------------------------------
-// AUTHENTICATION
-// ------------------------------------------------------------
 
 function checkSecret(req, res, next) {
   const secret = req.headers["x-worker-secret"];
 
   if (!WORKER_SECRET || secret !== WORKER_SECRET) {
-    return res.status(401).json({
-      error: "unauthorized",
-    });
+    return res.status(401).json({ error: "unauthorized" });
   }
 
   next();
 }
 
-// ------------------------------------------------------------
-// JOB PATHS
-// ------------------------------------------------------------
-
 function getJobRoot(jobId) {
-  return path.join(
-    STORAGE_DIR || "",
-    "smart",
-    jobId
-  );
+  return path.join(STORAGE_DIR || "", "smart", jobId);
 }
 
 function getAnalysisPath(jobId) {
-  return path.join(
-    getJobRoot(jobId),
-    "analysis",
-    "audio.mp3"
-  );
+  return path.join(getJobRoot(jobId), "analysis", "audio.mp3");
 }
 
 function getHookUploadDir(jobId) {
-  return path.join(
-    getJobRoot(jobId),
-    "hooks"
-  );
+  return path.join(getJobRoot(jobId), "hooks");
 }
 
 function getHookUploadPath(jobId, clipNumber) {
@@ -129,40 +88,21 @@ function getHookUploadPath(jobId, clipNumber) {
 }
 
 function getMetadataPath(jobId) {
-  return path.join(
-    getJobRoot(jobId),
-    "analysis.json"
-  );
+  return path.join(STORAGE_DIR || "", "smart", jobId, "analysis.json");
 }
 
 function getResultsDir(jobId) {
-  return path.join(
-    STORAGE_DIR || "",
-    "results",
-    jobId
-  );
+  return path.join(STORAGE_DIR || "", "results", jobId);
 }
 
 function getTmpDir(jobId) {
-  return path.join(
-    STORAGE_DIR || "",
-    "tmp",
-    `smart-${jobId}`
-  );
+  return path.join(STORAGE_DIR || "", "tmp", `smart-${jobId}`);
 }
-
-// ------------------------------------------------------------
-// METADATA HELPERS
-// ------------------------------------------------------------
 
 function saveSmartMetadata(jobId, data) {
   const metadataPath = getMetadataPath(jobId);
 
-  fs.mkdirSync(
-    path.dirname(metadataPath),
-    { recursive: true }
-  );
-
+  fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
   fs.writeFileSync(
     metadataPath,
     JSON.stringify(data, null, 2),
@@ -178,25 +118,18 @@ function loadSmartMetadata(jobId) {
   }
 
   try {
-    return JSON.parse(
-      fs.readFileSync(metadataPath, "utf8")
-    );
+    return JSON.parse(fs.readFileSync(metadataPath, "utf8"));
   } catch {
     return null;
   }
 }
-
-// ------------------------------------------------------------
-// PUSH STATUS
-// ------------------------------------------------------------
 
 async function pushStatus(
   jobId,
   statusUpdate,
   statusBaseUrl = NEXT_APP_URL
 ) {
-  const previous =
-    activeJobStatuses.get(jobId) || {};
+  const previous = activeJobStatuses.get(jobId) || {};
 
   activeJobStatuses.set(jobId, {
     ...previous,
@@ -205,15 +138,12 @@ async function pushStatus(
   });
 
   if (!statusBaseUrl) {
-    console.error(
-      `[${jobId}] NEXT_APP_URL is not configured`
-    );
+    console.error(`[${jobId}] NEXT_APP_URL is not configured`);
     return false;
   }
 
   const url =
-    `${statusBaseUrl.replace(/\/+$/, "")}` +
-    `/api/internal/status`;
+    `${statusBaseUrl.replace(/\\/+$/, "")}/api/internal/status`;
 
   const payload = {
     jobId,
@@ -222,19 +152,14 @@ async function pushStatus(
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     const controller = new AbortController();
-
-    const timeout = setTimeout(
-      () => controller.abort(),
-      15000
-    );
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-worker-secret":
-            WORKER_SECRET || "",
+          "x-worker-secret": WORKER_SECRET || "",
         },
         body: JSON.stringify(payload),
         signal: controller.signal,
@@ -246,30 +171,23 @@ async function pushStatus(
         return true;
       }
 
-      const body =
-        await response.text().catch(() => "");
+      const body = await response.text().catch(() => "");
 
       console.error(
-        `[${jobId}] Status callback failed ` +
-        `(attempt ${attempt}/3): HTTP ${response.status}` +
-        `${body ? ` — ${body.slice(0, 300)}` : ""}`
+        `[${jobId}] Status callback failed (attempt ${attempt}/3): HTTP ${response.status}${body ? ` — ${body.slice(0, 300)}` : ""}`
       );
     } catch (err) {
       clearTimeout(timeout);
 
       console.error(
-        `[${jobId}] Status callback failed ` +
-        `(attempt ${attempt}/3):`,
+        `[${jobId}] Status callback failed (attempt ${attempt}/3):`,
         err?.message || err
       );
     }
 
     if (attempt < 3) {
       await new Promise((resolve) =>
-        setTimeout(
-          resolve,
-          1000 * attempt
-        )
+        setTimeout(resolve, 1000 * attempt)
       );
     }
   }
@@ -277,58 +195,28 @@ async function pushStatus(
   return false;
 }
 
-// ------------------------------------------------------------
-// LIVE STATUS ENDPOINT
-// ------------------------------------------------------------
+app.get("/status/:jobId", checkSecret, (req, res) => {
+  const jobId = String(req.params.jobId || "").trim();
 
-app.get(
-  "/status/:jobId",
-  checkSecret,
-  (req, res) => {
-    const jobId =
-      String(req.params.jobId || "").trim();
-
-    if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
-      return res.status(400).json({
-        error: "Invalid jobId",
-      });
-    }
-
-    const status =
-      activeJobStatuses.get(jobId);
-
-    if (!status) {
-      return res.status(404).json({
-        error: "Job status not found",
-      });
-    }
-
-    res.set(
-      "Cache-Control",
-      "no-store, no-cache, must-revalidate"
-    );
-
-    return res.json(status);
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+    return res.status(400).json({ error: "Invalid jobId" });
   }
-);
 
-// ------------------------------------------------------------
-// WORD-SAFE SEGMENT SNAP
-// ------------------------------------------------------------
+  const status = activeJobStatuses.get(jobId);
 
-function snapSegmentToWords(
-  seg,
-  words,
-  videoDuration
-) {
+  if (!status) {
+    return res.status(404).json({ error: "Job status not found" });
+  }
+
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  return res.json(status);
+});
+
+function snapSegmentToWords(seg, words, videoDuration) {
   let start = Number(seg.startTime);
   let end = Number(seg.endTime);
 
-  if (
-    !Number.isFinite(start) ||
-    !Number.isFinite(end) ||
-    end <= start
-  ) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
     return seg;
   }
 
@@ -338,20 +226,12 @@ function snapSegmentToWords(
   const MAX_LENGTH = 90;
 
   const safeDuration =
-    Number.isFinite(videoDuration) &&
-    videoDuration > 0
+    Number.isFinite(videoDuration) && videoDuration > 0
       ? videoDuration
       : Infinity;
 
   start = Math.max(0, start);
-  end = Math.min(
-    safeDuration,
-    end
-  );
-
-  // ----------------------------------------------------------
-  // Snap start to the first overlapping word
-  // ----------------------------------------------------------
+  end = Math.min(safeDuration, end);
 
   if (Array.isArray(words) && words.length) {
     const firstWord = words.find(
@@ -361,23 +241,12 @@ function snapSegmentToWords(
     );
 
     if (firstWord) {
-      start = Math.max(
-        0,
-        Number(firstWord.start) - PRE_ROLL
-      );
+      start = Math.max(0, Number(firstWord.start) - PRE_ROLL);
     }
-
-    // --------------------------------------------------------
-    // Snap end to the final overlapping word
-    // --------------------------------------------------------
 
     let lastWord = null;
 
-    for (
-      let i = words.length - 1;
-      i >= 0;
-      i--
-    ) {
+    for (let i = words.length - 1; i >= 0; i--) {
       const word = words[i];
 
       if (
@@ -390,73 +259,37 @@ function snapSegmentToWords(
     }
 
     if (lastWord) {
-      end =
-        Number(lastWord.end) +
-        TAIL;
+      end = Number(lastWord.end) + TAIL;
     }
   }
 
-  end = Math.min(
-    safeDuration,
-    end
-  );
-
-  // ----------------------------------------------------------
-  // Guarantee minimum 10 seconds
-  // ----------------------------------------------------------
+  end = Math.min(safeDuration, end);
 
   if (end - start < MIN_LENGTH) {
-    const needed =
-      MIN_LENGTH - (end - start);
-
-    const roomAfter =
-      safeDuration - end;
-
-    const extendAfter =
-      Math.min(
-        needed,
-        Math.max(0, roomAfter)
-      );
+    const needed = MIN_LENGTH - (end - start);
+    const roomAfter = safeDuration - end;
+    const extendAfter = Math.min(needed, Math.max(0, roomAfter));
 
     end += extendAfter;
 
-    const remaining =
-      MIN_LENGTH - (end - start);
+    const remaining = MIN_LENGTH - (end - start);
 
     if (remaining > 0) {
-      const extendBefore =
-        Math.min(
-          remaining,
-          start
-        );
-
+      const extendBefore = Math.min(remaining, start);
       start -= extendBefore;
     }
   }
 
-  // ----------------------------------------------------------
-  // Guarantee maximum 90 seconds
-  // ----------------------------------------------------------
-
   if (end - start > MAX_LENGTH) {
-    end =
-      start + MAX_LENGTH;
+    end = start + MAX_LENGTH;
 
     if (end > safeDuration) {
       end = safeDuration;
-      start =
-        Math.max(
-          0,
-          end - MAX_LENGTH
-        );
+      start = Math.max(0, end - MAX_LENGTH);
     }
   }
 
-  if (
-    !Number.isFinite(start) ||
-    !Number.isFinite(end) ||
-    end <= start
-  ) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
     return seg;
   }
 
@@ -467,26 +300,10 @@ function snapSegmentToWords(
   };
 }
 
-// ------------------------------------------------------------
-// UPLOAD CORS
-// ------------------------------------------------------------
-
 function uploadCors(req, res, next) {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "*"
-  );
-
-  res.setHeader(
-    "Vary",
-    "Origin"
-  );
-
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "PUT, OPTIONS"
-  );
-
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "PUT, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset, X-Chunk-Index, X-Total-Chunks"
@@ -499,27 +316,43 @@ function uploadCors(req, res, next) {
   next();
 }
 
-// ------------------------------------------------------------
-// GENERIC CHUNK UPLOAD
-// ------------------------------------------------------------
+function pipelineRequest(req, destination) {
+  return new Promise((resolve, reject) => {
+    req.on("error", reject);
+    destination.on("error", reject);
+    destination.on("finish", resolve);
+    req.pipe(destination);
+  });
+}
 
-function pipelineRequest(
-  req,
-  destination
-) {
-  return new Promise(
-    (resolve, reject) => {
-      req.on("error", reject);
-      destination.on("error", reject);
+function parseContentRange(req) {
+  const value = String(req.headers["content-range"] || "").trim();
+  const match = /^bytes\\s+(\\d+)-(\\d+)\\/(\\d+)$/.exec(value);
 
-      destination.on(
-        "finish",
-        resolve
-      );
+  if (!match) {
+    return null;
+  }
 
-      req.pipe(destination);
-    }
-  );
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const total = Number(match[3]);
+
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    !Number.isSafeInteger(total) ||
+    start < 0 ||
+    end < start ||
+    total <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    offset: start,
+    contentLength: end - start + 1,
+    total,
+  };
 }
 
 async function handleChunkUpload({
@@ -536,18 +369,11 @@ async function handleChunkUpload({
     total <= 0 ||
     total > maxTotalSize
   ) {
-    return res.status(400).json({
-      error: "Invalid upload total size.",
-    });
+    return res.status(400).json({ error: "Invalid upload total size." });
   }
 
-  if (
-    !Number.isSafeInteger(offset) ||
-    offset < 0
-  ) {
-    return res.status(400).json({
-      error: "Invalid upload offset.",
-    });
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    return res.status(400).json({ error: "Invalid upload offset." });
   }
 
   if (
@@ -555,24 +381,16 @@ async function handleChunkUpload({
     contentLength <= 0 ||
     contentLength > MAX_CHUNK_SIZE
   ) {
-    return res.status(400).json({
-      error: "Invalid upload chunk.",
-    });
+    return res.status(400).json({ error: "Invalid upload chunk." });
   }
 
-  if (
-    offset + contentLength > total
-  ) {
+  if (offset + contentLength > total) {
     return res.status(400).json({
       error: "Upload chunk exceeds total size.",
     });
   }
 
-  const range =
-    String(
-      req.headers["content-range"] || ""
-    );
-
+  const range = String(req.headers["content-range"] || "");
   const expectedRange =
     `bytes ${offset}-${offset + contentLength - 1}/${total}`;
 
@@ -583,55 +401,31 @@ async function handleChunkUpload({
     });
   }
 
-  fs.mkdirSync(
-    path.dirname(filePath),
-    { recursive: true }
-  );
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
   try {
-    if (
-      offset === 0 &&
-      !fs.existsSync(filePath)
-    ) {
-      const fd =
-        fs.openSync(
-          filePath,
-          "w"
-        );
+    if (offset === 0 && !fs.existsSync(filePath)) {
+      const fd = fs.openSync(filePath, "w");
 
       try {
-        fs.ftruncateSync(
-          fd,
-          total
-        );
+        fs.ftruncateSync(fd, total);
       } finally {
         fs.closeSync(fd);
       }
-    } else if (
-      !fs.existsSync(filePath)
-    ) {
+    } else if (!fs.existsSync(filePath)) {
       return res.status(409).json({
-        error:
-          "Upload must start with the first chunk.",
+        error: "Upload must start with the first chunk.",
       });
     }
 
-    const writeStream =
-      fs.createWriteStream(
-        filePath,
-        {
-          flags: "r+",
-          start: offset,
-        }
-      );
+    const writeStream = fs.createWriteStream(filePath, {
+      flags: "r+",
+      start: offset,
+    });
 
-    await pipelineRequest(
-      req,
-      writeStream
-    );
+    await pipelineRequest(req, writeStream);
 
-    const complete =
-      offset + contentLength === total;
+    const complete = offset + contentLength === total;
 
     if (complete) {
       return res.status(201).json({
@@ -643,10 +437,7 @@ async function handleChunkUpload({
 
     return res.sendStatus(204);
   } catch (error) {
-    console.error(
-      "Chunk upload failed:",
-      error?.message || error
-    );
+    console.error("Chunk upload failed:", error?.message || error);
 
     return res.status(500).json({
       error: "Upload chunk failed.",
@@ -654,270 +445,152 @@ async function handleChunkUpload({
   }
 }
 
-// ------------------------------------------------------------
-// SMART AUDIO UPLOAD
-// ------------------------------------------------------------
+async function handleSmartUpload(req, res, filePath, maxTotalSize) {
+  const range = parseContentRange(req);
 
-app.options(
-  "/upload-analysis/:jobId",
-  uploadCors
-);
+  const headerTotal = Number(req.headers["x-upload-total"]);
+  const headerOffset = Number(req.headers["x-upload-offset"]);
 
-app.put(
-  "/upload-analysis/:jobId",
-  uploadCors,
-  async (req, res) => {
-    const jobId =
-      String(
-        req.params.jobId || ""
-      ).trim();
+  const total =
+    range?.total ??
+    (Number.isSafeInteger(headerTotal) ? headerTotal : NaN);
 
-    if (
-      !/^[a-zA-Z0-9_-]+$/.test(jobId)
-    ) {
-      return res.status(400).json({
-        error: "Invalid jobId.",
-      });
-    }
+  const offset =
+    range?.offset ??
+    (Number.isSafeInteger(headerOffset) ? headerOffset : NaN);
 
-    const total =
-      Number(
-        req.headers["x-upload-total"]
-      );
+  const contentLength =
+    range?.contentLength ??
+    Number(req.headers["content-length"]);
 
-    const offset =
-      Number(
-        req.headers["x-upload-offset"]
-      );
+  return handleChunkUpload({
+    req,
+    res,
+    filePath,
+    total,
+    offset,
+    contentLength,
+    maxTotalSize,
+  });
+}
 
-    const contentLength =
-      Number(
-        req.headers["content-length"]
-      );
+app.options("/upload-analysis/:jobId", uploadCors);
+app.put("/upload-analysis/:jobId", uploadCors, async (req, res) => {
+  const jobId = String(req.params.jobId || "").trim();
 
-    if (!STORAGE_DIR) {
-      return res.status(500).json({
-        error:
-          "STORAGE_DIR is not configured.",
-      });
-    }
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+    return res.status(400).json({ error: "Invalid jobId." });
+  }
 
-    return handleChunkUpload({
-      req,
-      res,
-      filePath:
-        getAnalysisPath(jobId),
-      total,
-      offset,
-      contentLength,
-      maxTotalSize:
-        MAX_ANALYSIS_AUDIO_SIZE,
+  if (!STORAGE_DIR) {
+    return res.status(500).json({
+      error: "STORAGE_DIR is not configured.",
     });
   }
-);
 
-// ------------------------------------------------------------
-// SMART SELECTED CLIP UPLOAD
-// ------------------------------------------------------------
+  return handleSmartUpload(
+    req,
+    res,
+    getAnalysisPath(jobId),
+    MAX_ANALYSIS_AUDIO_SIZE
+  );
+});
 
-app.options(
-  "/upload-clip/:jobId/:clipNumber",
-  uploadCors
-);
+app.options("/upload-clip/:jobId/:clipNumber", uploadCors);
+app.put("/upload-clip/:jobId/:clipNumber", uploadCors, async (req, res) => {
+  const jobId = String(req.params.jobId || "").trim();
+  const clipNumber = Number(req.params.clipNumber);
 
-app.put(
-  "/upload-clip/:jobId/:clipNumber",
-  uploadCors,
-  async (req, res) => {
-    const jobId =
-      String(
-        req.params.jobId || ""
-      ).trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+    return res.status(400).json({ error: "Invalid jobId." });
+  }
 
-    const clipNumber =
-      Number(
-        req.params.clipNumber
-      );
-
-    if (
-      !/^[a-zA-Z0-9_-]+$/.test(jobId)
-    ) {
-      return res.status(400).json({
-        error: "Invalid jobId.",
-      });
-    }
-
-    if (
-      !Number.isInteger(clipNumber) ||
-      clipNumber < 1 ||
-      clipNumber > 7
-    ) {
-      return res.status(400).json({
-        error:
-          "clipNumber must be between 1 and 7.",
-      });
-    }
-
-    const total =
-      Number(
-        req.headers["x-upload-total"]
-      );
-
-    const offset =
-      Number(
-        req.headers["x-upload-offset"]
-      );
-
-    const contentLength =
-      Number(
-        req.headers["content-length"]
-      );
-
-    if (!STORAGE_DIR) {
-      return res.status(500).json({
-        error:
-          "STORAGE_DIR is not configured.",
-      });
-    }
-
-    return handleChunkUpload({
-      req,
-      res,
-      filePath:
-        getHookUploadPath(
-          jobId,
-          clipNumber
-        ),
-      total,
-      offset,
-      contentLength,
-      maxTotalSize:
-        MAX_HOOK_CLIP_SIZE,
+  if (
+    !Number.isInteger(clipNumber) ||
+    clipNumber < 1 ||
+    clipNumber > 7
+  ) {
+    return res.status(400).json({
+      error: "clipNumber must be between 1 and 7.",
     });
   }
-);
 
-// ------------------------------------------------------------
-// SMART ANALYSIS
-//
-// Browser sends ONLY the small extracted MP3.
-// Original video never reaches this endpoint.
-// ------------------------------------------------------------
-
-app.post(
-  "/analyze",
-  checkSecret,
-  (req, res) => {
-    const {
-      jobId,
-      options,
-      statusUrl,
-      videoDuration,
-    } = req.body || {};
-
-    const cleanJobId =
-      String(jobId || "").trim();
-
-    if (
-      !/^[a-zA-Z0-9_-]+$/.test(
-        cleanJobId
-      )
-    ) {
-      return res.status(400).json({
-        error: "Invalid jobId.",
-      });
-    }
-
-    const duration =
-      Number(videoDuration);
-
-    if (
-      !Number.isFinite(duration) ||
-      duration <= 0
-    ) {
-      return res.status(400).json({
-        error:
-          "videoDuration is required.",
-      });
-    }
-
-    const analysisPath =
-      getAnalysisPath(cleanJobId);
-
-    if (
-      !fs.existsSync(analysisPath)
-    ) {
-      return res.status(404).json({
-        error:
-          "Analysis audio has not been uploaded yet.",
-      });
-    }
-
-    const stats =
-      fs.statSync(analysisPath);
-
-    if (
-      !stats.isFile() ||
-      stats.size <= 0
-    ) {
-      return res.status(400).json({
-        error:
-          "Analysis audio is invalid.",
-      });
-    }
-
-    res.status(202).json({
-      received: true,
-      jobId: cleanJobId,
-      status: "queued",
+  if (!STORAGE_DIR) {
+    return res.status(500).json({
+      error: "STORAGE_DIR is not configured.",
     });
+  }
 
-    const callbackStatusUrl =
-      typeof statusUrl === "string" &&
-      /^https?:\/\//i.test(statusUrl)
-        ? statusUrl.replace(
-            /\/+$/,
-            ""
-          )
-        : NEXT_APP_URL.replace(
-            /\/+$/,
-            ""
-          );
+  return handleSmartUpload(
+    req,
+    res,
+    getHookUploadPath(jobId, clipNumber),
+    MAX_HOOK_CLIP_SIZE
+  );
+});
 
-    runSmartAnalysis(
+app.post("/analyze", checkSecret, (req, res) => {
+  const { jobId, options, statusUrl, videoDuration } = req.body || {};
+  const cleanJobId = String(jobId || "").trim();
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(cleanJobId)) {
+    return res.status(400).json({ error: "Invalid jobId." });
+  }
+
+  const duration = Number(videoDuration);
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return res.status(400).json({ error: "videoDuration is required." });
+  }
+
+  const analysisPath = getAnalysisPath(cleanJobId);
+
+  if (!fs.existsSync(analysisPath)) {
+    return res.status(404).json({
+      error: "Analysis audio has not been uploaded yet.",
+    });
+  }
+
+  const stats = fs.statSync(analysisPath);
+
+  if (!stats.isFile() || stats.size <= 0) {
+    return res.status(400).json({
+      error: "Analysis audio is invalid.",
+    });
+  }
+
+  res.status(202).json({
+    received: true,
+    jobId: cleanJobId,
+    status: "queued",
+  });
+
+  const callbackStatusUrl =
+    typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl)
+      ? statusUrl.replace(/\/+$/, "")
+      : NEXT_APP_URL.replace(/\/+$/, "");
+
+  runSmartAnalysis(
+    cleanJobId,
+    analysisPath,
+    options || {},
+    duration,
+    callbackStatusUrl
+  ).catch(async (err) => {
+    console.error(`[${cleanJobId}] Smart analysis crashed:`, err);
+
+    await pushStatus(
       cleanJobId,
-      analysisPath,
-      options || {},
-      duration,
+      {
+        status: "error",
+        progress: 0,
+        message: "Analysis failed",
+        error: err?.message || "Unknown analysis error",
+      },
       callbackStatusUrl
-    ).catch(
-      async (err) => {
-        console.error(
-          `[${cleanJobId}] Smart analysis crashed:`,
-          err
-        );
-
-        await pushStatus(
-          cleanJobId,
-          {
-            status: "error",
-            progress: 0,
-            message:
-              "Analysis failed",
-            error:
-              err?.message ||
-              "Unknown analysis error",
-          },
-          callbackStatusUrl
-        );
-      }
     );
-  }
-);
-
-// ------------------------------------------------------------
-// SMART ANALYSIS PIPELINE
-// ------------------------------------------------------------
+  });
+});
 
 async function runSmartAnalysis(
   jobId,
@@ -926,189 +599,115 @@ async function runSmartAnalysis(
   videoDuration,
   statusBaseUrl
 ) {
-  const reportStatus =
-    (update) =>
-      pushStatus(
-        jobId,
-        update,
-        statusBaseUrl
-      );
+  const reportStatus = (update) =>
+    pushStatus(jobId, update, statusBaseUrl);
 
   try {
     const clipCount = Math.max(
       1,
       Math.min(
         7,
-        Number(
-          options.clipCount ||
-          options.numClips ||
-          6
-        ) || 6
+        Number(options.clipCount || options.numClips || 6) || 6
       )
     );
 
-    const audioLanguage =
-      options.audioLanguage ||
-      "auto";
-
-    const captionLanguage =
-      options.captionLanguage ||
-      "same";
-
-    // --------------------------------------------------------
-    // 1. Transcription
-    // --------------------------------------------------------
+    const audioLanguage = options.audioLanguage || "auto";
+    const captionLanguage = options.captionLanguage || "same";
 
     await reportStatus({
       status: "transcribing",
       progress: 10,
-      message:
-        "Transcribing extracted audio",
+      message: "Transcribing extracted audio",
     });
 
-    const transcription =
-      await transcribeWithTimestamps(
-        analysisPath,
-        audioLanguage
-      );
+    const transcription = await transcribeWithTimestamps(
+      analysisPath,
+      audioLanguage
+    );
 
-    const text =
-      transcription?.text;
+    const text = transcription?.text;
+    const words = transcription?.words;
 
-    const words =
-      transcription?.words;
-
-    if (
-      typeof text !== "string" ||
-      !text.trim()
-    ) {
-      throw new Error(
-        "Transcription returned no transcript text."
-      );
+    if (typeof text !== "string" || !text.trim()) {
+      throw new Error("Transcription returned no transcript text.");
     }
 
-    if (
-      !Array.isArray(words) ||
-      words.length === 0
-    ) {
+    if (!Array.isArray(words) || words.length === 0) {
       throw new Error(
         "Transcription returned no words. Check the audio and GROQ_API_KEY."
       );
     }
 
     console.log(
-      `[${jobId}] Transcript received: ` +
-      `${text.length} characters, ` +
-      `${words.length} words`
+      `[${jobId}] Transcript received: ${text.length} characters, ${words.length} words`
     );
-
-    // --------------------------------------------------------
-    // 2. Caption language conversion
-    // --------------------------------------------------------
 
     let captionWords = words;
 
-    if (
-      captionLanguage !== "same"
-    ) {
+    if (captionLanguage !== "same") {
       await reportStatus({
         status: "transcribing",
         progress: 25,
-        message:
-          "Preparing caption language",
+        message: "Preparing caption language",
       });
 
-      captionWords =
-        await convertWords(
+      try {
+        captionWords = await convertWords(
           words,
           captionLanguage,
           audioLanguage
         );
-
-      if (
-        !Array.isArray(
-          captionWords
-        ) ||
-        captionWords.length === 0
-      ) {
-        throw new Error(
-          "Caption conversion returned no words."
+      } catch (conversionError) {
+        console.warn(
+          `[${jobId}] Caption conversion failed, keeping original words:`,
+          conversionError?.message || conversionError
         );
+        captionWords = words;
+      }
+
+      if (!Array.isArray(captionWords) || captionWords.length === 0) {
+        captionWords = words;
       }
     }
-
-    // --------------------------------------------------------
-    // 3. Hook detection
-    // --------------------------------------------------------
 
     await reportStatus({
       status: "detecting_hooks",
       progress: 40,
-      message:
-        "Finding complete hooks",
+      message: "Finding complete hooks",
     });
 
-    const segments =
-      await detectHookSegments(
-        text,
-        clipCount,
-        videoDuration,
-        words
-      );
+    const segments = await detectHookSegments(
+      text,
+      clipCount,
+      videoDuration,
+      words
+    );
 
-    if (
-      !Array.isArray(segments) ||
-      segments.length === 0
-    ) {
-      throw new Error(
-        "No hook segments were detected."
-      );
+    if (!Array.isArray(segments) || segments.length === 0) {
+      throw new Error("No hook segments were detected.");
     }
 
-    // --------------------------------------------------------
-    // 4. Snap + enforce 10–90 seconds
-    // --------------------------------------------------------
+    const normalizedSegments = segments
+      .map((segment) =>
+        snapSegmentToWords(segment, words, videoDuration)
+      )
+      .filter((segment) => {
+        const start = Number(segment.startTime);
+        const end = Number(segment.endTime);
+        const duration = end - start;
 
-    const normalizedSegments =
-      segments
-        .map((segment) =>
-          snapSegmentToWords(
-            segment,
-            words,
-            videoDuration
-          )
-        )
-        .filter((segment) => {
-          const start =
-            Number(
-              segment.startTime
-            );
-
-          const end =
-            Number(
-              segment.endTime
-            );
-
-          const duration =
-            end - start;
-
-          return (
-            Number.isFinite(start) &&
-            Number.isFinite(end) &&
-            duration >= 10 &&
-            duration <= 90 &&
-            start >= 0 &&
-            end <= videoDuration
-          );
-        })
-        .slice(
-          0,
-          clipCount
+        return (
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
+          duration >= 10 &&
+          duration <= 90 &&
+          start >= 0 &&
+          end <= videoDuration
         );
+      })
+      .slice(0, clipCount);
 
-    if (
-      normalizedSegments.length === 0
-    ) {
+    if (normalizedSegments.length === 0) {
       throw new Error(
         "No valid hooks between 10 and 90 seconds were found."
       );
@@ -1116,254 +715,143 @@ async function runSmartAnalysis(
 
     console.log(
       `[${jobId}] Smart hooks detected:`,
-      normalizedSegments.map(
-        (segment, index) => ({
-          index: index + 1,
-          title: segment.title,
-          start:
-            Number(
-              segment.startTime
-            ).toFixed(2),
-          end:
-            Number(
-              segment.endTime
-            ).toFixed(2),
-        })
-      )
+      normalizedSegments.map((segment, index) => ({
+        index: index + 1,
+        title: segment.title,
+        start: Number(segment.startTime).toFixed(2),
+        end: Number(segment.endTime).toFixed(2),
+      }))
     );
 
-    // --------------------------------------------------------
-    // 5. Persist small analysis metadata
-    // --------------------------------------------------------
-
-    saveSmartMetadata(
+    saveSmartMetadata(jobId, {
       jobId,
-      {
-        jobId,
-        videoDuration,
-        clipCount,
-        options,
-        transcript: text,
-        words,
-        captionWords,
-        segments:
-          normalizedSegments,
-        createdAt:
-          new Date().toISOString(),
-      }
-    );
+      videoDuration,
+      clipCount,
+      options,
+      transcript: text,
+      words,
+      captionWords,
+      segments: normalizedSegments,
+      createdAt: new Date().toISOString(),
+    });
 
     await reportStatus({
       status: "detecting_hooks",
       progress: 50,
-      message:
-        `${normalizedSegments.length} complete hooks found`,
-      clips:
-        normalizedSegments.map(
-          (segment, index) => ({
-            index,
-            title:
-              segment.title ||
-              `Clip ${index + 1}`,
-            hookReason:
-              segment.hookReason ||
-              "",
-            startTime:
-              Number(
-                segment.startTime
-              ),
-            endTime:
-              Number(
-                segment.endTime
-              ),
-            rawUrl: "",
-            editedUrl: "",
-          })
-        ),
+      message: `${normalizedSegments.length} complete hooks found`,
+      clips: normalizedSegments.map((segment, index) => ({
+        index,
+        title: segment.title || `Clip ${index + 1}`,
+        hookReason: segment.hookReason || "",
+        startTime: Number(segment.startTime),
+        endTime: Number(segment.endTime),
+        rawUrl: "",
+        editedUrl: "",
+      })),
     });
 
-    console.log(
-      `[${jobId}] Smart analysis completed`
-    );
+    console.log(`[${jobId}] Smart analysis completed`);
   } catch (err) {
     throw err;
   }
 }
 
-// ------------------------------------------------------------
-// SMART RENDER SELECTED CLIPS
-//
-// Browser sends ONLY the selected hook MP4 files.
-// Original 3 GB source is never needed here.
-// ------------------------------------------------------------
+app.post("/render-selected", checkSecret, (req, res) => {
+  const { jobId, selectedSegments, options, statusUrl } = req.body || {};
+  const cleanJobId = String(jobId || "").trim();
 
-app.post(
-  "/render-selected",
-  checkSecret,
-  (req, res) => {
-    const {
-      jobId,
-      selectedSegments,
-      options,
-      statusUrl,
-    } = req.body || {};
-
-    const cleanJobId =
-      String(jobId || "").trim();
-
-    if (
-      !/^[a-zA-Z0-9_-]+$/.test(
-        cleanJobId
-      )
-    ) {
-      return res.status(400).json({
-        error: "Invalid jobId.",
-      });
-    }
-
-    const metadata =
-      loadSmartMetadata(
-        cleanJobId
-      );
-
-    if (!metadata) {
-      return res.status(404).json({
-        error:
-          "Smart analysis data not found. Analyze the audio first.",
-      });
-    }
-
-    if (
-      !Array.isArray(
-        selectedSegments
-      ) ||
-      selectedSegments.length === 0
-    ) {
-      return res.status(400).json({
-        error:
-          "selectedSegments are required.",
-      });
-    }
-
-    const segments =
-      selectedSegments
-        .slice(0, 7)
-        .map((segment, index) => ({
-          index,
-          title:
-            String(
-              segment?.title ||
-              metadata.segments?.[index]
-                ?.title ||
-              `Clip ${index + 1}`
-            ),
-          hookReason:
-            String(
-              segment?.hookReason ||
-              metadata.segments?.[index]
-                ?.hookReason ||
-              ""
-            ),
-          startTime:
-            Number(
-              segment?.startTime ??
-              metadata.segments?.[index]
-                ?.startTime
-            ),
-          endTime:
-            Number(
-              segment?.endTime ??
-              metadata.segments?.[index]
-                ?.endTime
-            ),
-        }));
-
-    for (
-      let i = 0;
-      i < segments.length;
-      i++
-    ) {
-      const clipPath =
-        getHookUploadPath(
-          cleanJobId,
-          i + 1
-        );
-
-      if (
-        !fs.existsSync(clipPath)
-      ) {
-        return res.status(400).json({
-          error:
-            `Selected clip ${i + 1} has not been uploaded.`,
-        });
-      }
-
-      const stats =
-        fs.statSync(clipPath);
-
-      if (
-        !stats.isFile() ||
-        stats.size <= 0
-      ) {
-        return res.status(400).json({
-          error:
-            `Selected clip ${i + 1} is invalid.`,
-        });
-      }
-    }
-
-    res.status(202).json({
-      received: true,
-      jobId: cleanJobId,
-      status: "queued",
-    });
-
-    const callbackStatusUrl =
-      typeof statusUrl === "string" &&
-      /^https?:\/\//i.test(statusUrl)
-        ? statusUrl.replace(
-            /\/+$/,
-            ""
-          )
-        : NEXT_APP_URL.replace(
-            /\/+$/,
-            ""
-          );
-
-    runSmartRender(
-      cleanJobId,
-      segments,
-      metadata,
-      options || metadata.options || {},
-      callbackStatusUrl
-    ).catch(
-      async (err) => {
-        console.error(
-          `[${cleanJobId}] Smart render crashed:`,
-          err
-        );
-
-        await pushStatus(
-          cleanJobId,
-          {
-            status: "error",
-            progress: 0,
-            message:
-              "Rendering failed",
-            error:
-              err?.message ||
-              "Unknown rendering error",
-          },
-          callbackStatusUrl
-        );
-      }
-    );
+  if (!/^[a-zA-Z0-9_-]+$/.test(cleanJobId)) {
+    return res.status(400).json({ error: "Invalid jobId." });
   }
-);
 
-// ------------------------------------------------------------
-// SMART RENDER PIPELINE
-// ------------------------------------------------------------
+  const metadata = loadSmartMetadata(cleanJobId);
+
+  if (!metadata) {
+    return res.status(404).json({
+      error: "Smart analysis data not found. Analyze the audio first.",
+    });
+  }
+
+  if (!Array.isArray(selectedSegments) || selectedSegments.length === 0) {
+    return res.status(400).json({
+      error: "selectedSegments are required.",
+    });
+  }
+
+  const segments = selectedSegments
+    .slice(0, 7)
+    .map((segment, index) => ({
+      index,
+      title: String(
+        segment?.title ||
+          metadata.segments?.[index]?.title ||
+          `Clip ${index + 1}`
+      ),
+      hookReason: String(
+        segment?.hookReason ||
+          metadata.segments?.[index]?.hookReason ||
+          ""
+      ),
+      startTime: Number(
+        segment?.startTime ??
+          metadata.segments?.[index]?.startTime
+      ),
+      endTime: Number(
+        segment?.endTime ??
+          metadata.segments?.[index]?.endTime
+      ),
+    }));
+
+  for (let i = 0; i < segments.length; i++) {
+    const clipPath = getHookUploadPath(cleanJobId, i + 1);
+
+    if (!fs.existsSync(clipPath)) {
+      return res.status(400).json({
+        error: `Selected clip ${i + 1} has not been uploaded.`,
+      });
+    }
+
+    const stats = fs.statSync(clipPath);
+
+    if (!stats.isFile() || stats.size <= 0) {
+      return res.status(400).json({
+        error: `Selected clip ${i + 1} is invalid.`,
+      });
+    }
+  }
+
+  res.status(202).json({
+    received: true,
+    jobId: cleanJobId,
+    status: "queued",
+  });
+
+  const callbackStatusUrl =
+    typeof statusUrl === "string" && /^https?:\/\//i.test(statusUrl)
+      ? statusUrl.replace(/\/+$/, "")
+      : NEXT_APP_URL.replace(/\/+$/, "");
+
+  runSmartRender(
+    cleanJobId,
+    segments,
+    metadata,
+    options || metadata.options || {},
+    callbackStatusUrl
+  ).catch(async (err) => {
+    console.error(`[${cleanJobId}] Smart render crashed:`, err);
+
+    await pushStatus(
+      cleanJobId,
+      {
+        status: "error",
+        progress: 0,
+        message: "Rendering failed",
+        error: err?.message || "Unknown rendering error",
+      },
+      callbackStatusUrl
+    );
+  });
+});
 
 async function runSmartRender(
   jobId,
@@ -1372,21 +860,11 @@ async function runSmartRender(
   options,
   statusBaseUrl
 ) {
-  const resultsDir =
-    getResultsDir(jobId);
+  const resultsDir = getResultsDir(jobId);
+  const tmpDir = getTmpDir(jobId);
 
-  const tmpDir =
-    getTmpDir(jobId);
-
-  fs.mkdirSync(
-    resultsDir,
-    { recursive: true }
-  );
-
-  fs.mkdirSync(
-    tmpDir,
-    { recursive: true }
-  );
+  fs.mkdirSync(resultsDir, { recursive: true });
+  fs.mkdirSync(tmpDir, { recursive: true });
 
   const captionColor =
     typeof options.captionColor === "string" &&
@@ -1394,88 +872,41 @@ async function runSmartRender(
       ? options.captionColor.trim()
       : "#FFD700";
 
-  const framing =
-    options.framing === "fill"
-      ? "fill"
-      : "fit";
+  const framing = options.framing === "fill" ? "fill" : "fit";
 
-  const useBgm =
-    Boolean(
-      options.useBgm ||
-      options.bgm
-    );
+  const useBgm = Boolean(options.useBgm || options.bgm);
 
-  const captionWords =
-    Array.isArray(
-      metadata.captionWords
-    )
-      ? metadata.captionWords
-      : metadata.words;
+  const captionWords = Array.isArray(metadata.captionWords)
+    ? metadata.captionWords
+    : metadata.words;
 
-  const usedBgmFiles =
-    new Set();
+  const usedBgmFiles = new Set();
 
-  const reportStatus =
-    (update) =>
-      pushStatus(
-        jobId,
-        update,
-        statusBaseUrl
-      );
+  const reportStatus = (update) =>
+    pushStatus(jobId, update, statusBaseUrl);
 
   try {
-    const total =
-      selectedSegments.length;
-
+    const total = selectedSegments.length;
     const clips = [];
 
-    for (
-      let i = 0;
-      i < total;
-      i++
-    ) {
-      const segment =
-        selectedSegments[i];
+    for (let i = 0; i < total; i++) {
+      const segment = selectedSegments[i];
+      const clipNum = i + 1;
+      const uploadedClipPath = getHookUploadPath(jobId, clipNum);
 
-      const clipNum =
-        i + 1;
-
-      const uploadedClipPath =
-        getHookUploadPath(
-          jobId,
-          clipNum
-        );
-
-      if (
-        !fs.existsSync(
-          uploadedClipPath
-        )
-      ) {
+      if (!fs.existsSync(uploadedClipPath)) {
         throw new Error(
           `Selected hook clip ${clipNum} is missing.`
         );
       }
 
-      const startTime =
-        Number(
-          segment.startTime
-        );
-
-      const endTime =
-        Number(
-          segment.endTime
-        );
-
-      const clipDuration =
-        endTime - startTime;
+      const startTime = Number(segment.startTime);
+      const endTime = Number(segment.endTime);
+      const clipDuration = endTime - startTime;
 
       if (
-        !Number.isFinite(
-          startTime
-        ) ||
-        !Number.isFinite(
-          endTime
-        ) ||
+        !Number.isFinite(startTime) ||
+        !Number.isFinite(endTime) ||
         clipDuration < 10 ||
         clipDuration > 90
       ) {
@@ -1484,65 +915,24 @@ async function runSmartRender(
         );
       }
 
-      const rawFilename =
-        `clip-${clipNum}-raw.mp4`;
+      const rawFilename = `clip-${clipNum}-raw.mp4`;
+      const editedFilename = `clip-${clipNum}-edited.mp4`;
 
-      const editedFilename =
-        `clip-${clipNum}-edited.mp4`;
-
-      const rawOutPath =
-        path.join(
-          resultsDir,
-          rawFilename
-        );
-
-      const editedOutPath =
-        path.join(
-          resultsDir,
-          editedFilename
-        );
-
-      const assPath =
-        path.join(
-          tmpDir,
-          `captions-${clipNum}.ass`
-        );
+      const rawOutPath = path.join(resultsDir, rawFilename);
+      const editedOutPath = path.join(resultsDir, editedFilename);
+      const assPath = path.join(tmpDir, `captions-${clipNum}.ass`);
 
       await reportStatus({
         status: "rendering",
-        progress:
-          50 +
-          Math.round(
-            (i / total) * 45
-          ),
-        message:
-          `Rendering clip ${clipNum} of ${total}`,
+        progress: 50 + Math.round((i / total) * 45),
+        message: `Rendering clip ${clipNum} of ${total}`,
       });
 
       console.log(
-        `[${jobId}] smart clip ${clipNum}: ` +
-        `${startTime.toFixed(2)}s - ` +
-        `${endTime.toFixed(2)}s ` +
-        `(${clipDuration.toFixed(2)}s) ` +
-        `"${segment.title || ""}"`
+        `[${jobId}] smart clip ${clipNum}: ${startTime.toFixed(2)}s - ${endTime.toFixed(2)}s (${clipDuration.toFixed(2)}s) "${segment.title || ""}"`
       );
 
-      // ------------------------------------------------------
-      // The uploaded browser-trimmed hook becomes the raw clip.
-      // NO original 3 GB video is used here.
-      // ------------------------------------------------------
-
-      fs.copyFileSync(
-        uploadedClipPath,
-        rawOutPath
-      );
-
-      // ------------------------------------------------------
-      // Captions
-      //
-      // captionWords still contain ORIGINAL VIDEO timestamps.
-      // buildAssCaptions shifts them relative to startTime.
-      // ------------------------------------------------------
+      fs.copyFileSync(uploadedClipPath, rawOutPath);
 
       buildAssCaptions(
         captionWords,
@@ -1552,23 +942,14 @@ async function runSmartRender(
         assPath
       );
 
-      // ------------------------------------------------------
-      // BGM
-      // ------------------------------------------------------
-
-      const bgmPath =
-        useBgm
-          ? chooseBgmForSegment(
-              segment.title,
-              segment.hookReason,
-              usedBgmFiles,
-              BGM_DIR
-            )
-          : null;
-
-      // ------------------------------------------------------
-      // Final edited clip
-      // ------------------------------------------------------
+      const bgmPath = useBgm
+        ? chooseBgmForSegment(
+            segment.title,
+            segment.hookReason,
+            usedBgmFiles,
+            BGM_DIR
+          )
+        : null;
 
       await buildEditedClip(
         rawOutPath,
@@ -1581,241 +962,116 @@ async function runSmartRender(
 
       clips.push({
         index: i,
-        title:
-          segment.title ||
-          `Clip ${clipNum}`,
-        hookReason:
-          segment.hookReason ||
-          "",
+        title: segment.title || `Clip ${clipNum}`,
+        hookReason: segment.hookReason || "",
         startTime,
         endTime,
-        rawUrl:
-          `/api/download/${jobId}/${rawFilename}`,
-        editedUrl:
-          `/api/download/${jobId}/${editedFilename}`,
+        rawUrl: `/api/download/${jobId}/${rawFilename}`,
+        editedUrl: `/api/download/${jobId}/${editedFilename}`,
       });
 
       await reportStatus({
         status: "rendering",
-        progress:
-          50 +
-          Math.round(
-            ((i + 1) / total) * 45
-          ),
-        message:
-          `Clip ${clipNum} of ${total} completed`,
+        progress: 50 + Math.round(((i + 1) / total) * 45),
+        message: `Clip ${clipNum} of ${total} completed`,
         clips,
       });
     }
 
-    // --------------------------------------------------------
-    // Cleanup temporary files
-    // --------------------------------------------------------
-
     try {
-      fs.rmSync(
-        tmpDir,
-        {
-          recursive: true,
-          force: true,
-        }
-      );
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (cleanupError) {
       console.warn(
         `[${jobId}] smart tmp cleanup failed:`,
-        cleanupError?.message ||
-          cleanupError
+        cleanupError?.message || cleanupError
       );
     }
 
-    // --------------------------------------------------------
-    // Keep results, delete uploaded analysis + hook inputs
-    // --------------------------------------------------------
-
     try {
-      fs.rmSync(
-        getJobRoot(jobId),
-        {
-          recursive: true,
-          force: true,
-        }
-      );
+      fs.rmSync(getJobRoot(jobId), { recursive: true, force: true });
     } catch (cleanupError) {
       console.warn(
         `[${jobId}] smart input cleanup failed:`,
-        cleanupError?.message ||
-          cleanupError
+        cleanupError?.message || cleanupError
       );
     }
-
-    // --------------------------------------------------------
-    // DONE
-    // --------------------------------------------------------
 
     await reportStatus({
       status: "done",
       progress: 100,
-      message:
-        `${clips.length} clip${clips.length === 1 ? "" : "s"} ready`,
+      message: `${clips.length} clip${clips.length === 1 ? "" : "s"} ready`,
       clips,
     });
 
-    console.log(
-      `[${jobId}] Smart pipeline completed successfully`
-    );
+    console.log(`[${jobId}] Smart pipeline completed successfully`);
   } catch (err) {
     try {
-      fs.rmSync(
-        tmpDir,
-        {
-          recursive: true,
-          force: true,
-        }
-      );
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch {}
 
     throw err;
   }
 }
 
-// ------------------------------------------------------------
-// LEGACY PROCESS ENDPOINT
-//
-// Kept so the old flow does not instantly break while the new
-// browser smart-flow is being wired into app/page.tsx.
-// ------------------------------------------------------------
+app.post("/process", checkSecret, (req, res) => {
+  return res.status(410).json({
+    error:
+      "Legacy full-source processing is disabled. Use the smart analysis and selected-clip rendering flow.",
+  });
+});
 
-app.post(
-  "/process",
-  checkSecret,
-  (req, res) => {
-    return res.status(410).json({
-      error:
-        "Legacy full-source processing is disabled. Use the smart analysis and selected-clip rendering flow.",
+app.get("/download/:jobId/:filename", checkSecret, (req, res) => {
+  const jobId = String(req.params.jobId || "").trim();
+  const filename = String(req.params.filename || "").trim();
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+    return res.status(400).json({ error: "Invalid jobId" });
+  }
+
+  if (!/^clip-\\d+-(raw|edited)\\.mp4$/i.test(filename)) {
+    return res.status(400).json({ error: "Invalid filename" });
+  }
+
+  if (!STORAGE_DIR) {
+    return res.status(500).json({
+      error: "STORAGE_DIR is not configured",
     });
   }
-);
 
-// ------------------------------------------------------------
-// DOWNLOAD ENDPOINT
-// ------------------------------------------------------------
+  const resultsRoot = path.resolve(
+    STORAGE_DIR,
+    "results",
+    jobId
+  );
 
-app.get(
-  "/download/:jobId/:filename",
-  checkSecret,
-  (req, res) => {
-    const jobId =
-      String(
-        req.params.jobId || ""
-      ).trim();
+  const filePath = path.resolve(
+    resultsRoot,
+    filename
+  );
 
-    const filename =
-      String(
-        req.params.filename || ""
-      ).trim();
-
-    if (
-      !/^[a-zA-Z0-9_-]+$/.test(
-        jobId
-      )
-    ) {
-      return res.status(400).json({
-        error: "Invalid jobId",
-      });
-    }
-
-    if (
-      !/^clip-\d+-(raw|edited)\.mp4$/i.test(
-        filename
-      )
-    ) {
-      return res.status(400).json({
-        error: "Invalid filename",
-      });
-    }
-
-    if (!STORAGE_DIR) {
-      return res.status(500).json({
-        error:
-          "STORAGE_DIR is not configured",
-      });
-    }
-
-    const resultsRoot =
-      path.resolve(
-        STORAGE_DIR,
-        "results",
-        jobId
-      );
-
-    const filePath =
-      path.resolve(
-        resultsRoot,
-        filename
-      );
-
-    if (
-      !filePath.startsWith(
-        resultsRoot + path.sep
-      )
-    ) {
-      return res.status(400).json({
-        error:
-          "Invalid file path",
-      });
-    }
-
-    if (
-      !fs.existsSync(filePath)
-    ) {
-      return res.status(404).json({
-        error: "File not found",
-      });
-    }
-
-    return res.download(
-      filePath,
-      filename
-    );
+  if (!filePath.startsWith(resultsRoot + path.sep)) {
+    return res.status(400).json({ error: "Invalid file path" });
   }
-);
 
-// ------------------------------------------------------------
-// HEALTH CHECK
-// ------------------------------------------------------------
-
-app.get(
-  "/health",
-  (req, res) => {
-    res.json({
-      ok: true,
-      service:
-        "captify-worker",
-    });
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "File not found" });
   }
-);
 
-// ------------------------------------------------------------
-// START WORKER
-// ------------------------------------------------------------
+  return res.download(filePath, filename);
+});
 
-app.listen(
-  PORT,
-  () => {
-    console.log(
-      `Captify worker listening on port ${PORT}`
-    );
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "captify-worker",
+  });
+});
 
-    console.log(
-      `STORAGE_DIR = ${STORAGE_DIR}`
-    );
-
-    console.log(
-      `NEXT_APP_URL = ${NEXT_APP_URL}`
-    );
-
-    console.log(
-      "SMART FLOW = browser audio extraction + selected hook uploads"
-    );
-  }
-);
+app.listen(PORT, () => {
+  console.log(`Captify worker listening on port ${PORT}`);
+  console.log(`STORAGE_DIR = ${STORAGE_DIR}`);
+  console.log(`NEXT_APP_URL = ${NEXT_APP_URL}`);
+  console.log(
+    "SMART FLOW = browser audio extraction + selected hook uploads"
+  );
+});
