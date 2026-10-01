@@ -230,6 +230,21 @@ function buildFilterGraph(
   const srcW = Number(info.width);
   const srcH = Number(info.height);
 
+  // Render's free instance is intentionally tiny.  A 4K source can make
+  // FFmpeg hold very large decoded frames while adding captions, which can
+  // cause the free instance to be restarted during the first render clip.
+  // For 4K-or-larger sources, render a 720x1280 deliverable; 1080p sources
+  // keep the normal 1080x1920 output. This keeps the 9:16 result usable while
+  // dramatically reducing the peak memory required by FFmpeg.
+  const targetWidth =
+    Math.max(srcW, srcH) >= 2160
+      ? 720
+      : VIDEO_WIDTH;
+  const targetHeight =
+    Math.max(srcW, srcH) >= 2160
+      ? 1280
+      : VIDEO_HEIGHT;
+
   if (
     !Number.isFinite(srcW) ||
     !Number.isFinite(srcH) ||
@@ -262,7 +277,7 @@ function buildFilterGraph(
 
     fgChain =
       `crop=${cropW}:${cropH},` +
-      `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT}`;
+      `scale=${targetWidth}:${targetHeight}`;
   } else {
     const fit = Math.min(
       VIDEO_WIDTH / srcW,
@@ -279,7 +294,7 @@ function buildFilterGraph(
   // Native 9:16 sources do not need a duplicated blurred background.
   // Avoiding split/overlay greatly reduces FFmpeg memory usage on Render.
   const sourceIsVertical =
-    Math.abs(srcW / srcH - VIDEO_WIDTH / VIDEO_HEIGHT) < 0.01;
+    Math.abs(srcW / srcH - targetWidth / targetHeight) < 0.01;
 
   const filters = [];
 
@@ -299,11 +314,11 @@ function buildFilterGraph(
       `[bgsrc]` +
         `crop=trunc(iw*0.94/2)*2:` +
         `trunc(ih*0.94/2)*2,` +
-        `scale=270:480:` +
+        `scale=180:320:` +
         `force_original_aspect_ratio=increase,` +
-        `crop=270:480,` +
+        `crop=180:320,` +
         `gblur=sigma=8,` +
-        `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT},` +
+        `scale=${targetWidth}:${targetHeight},` +
         `eq=brightness=-0.1` +
         `[bg]`
     );
