@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   ALL_FORMATS,
@@ -183,8 +183,10 @@ export async function trimVideoForUpload(
         codec: "avc",
         bitrate: 5_000_000,
         frameRate: 30,
-        hardwareAcceleration:
-          "prefer-hardware",
+        // Do not force hardware encoding here.
+        // Some Chrome/Edge + GPU combinations reject this WebCodecs
+        // configuration with: "Unsupported configuration. Check isConfigSupported() prior to calling configure()."
+        // Leaving the setting unset lets WebCodecs choose a supported encoder.
         forceTranscode: true,
       },
       audio: {
