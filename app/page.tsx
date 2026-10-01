@@ -1153,7 +1153,7 @@ export default function Home() {
         const clipUploadUrl =
           `${workerBase}/upload-clip/${encodeURIComponent(
             newJobId
-          )}/${segment.index}`;
+          )}/${i + 1}`;
 
         await uploadChunks(
           clipUploadUrl,
