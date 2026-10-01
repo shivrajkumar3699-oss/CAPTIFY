@@ -31,7 +31,7 @@ function hexToBgrHex(hex) {
 function formatAssTime(seconds) {
   if (seconds < 0) seconds = 0;
   const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 60) / 60);
+  const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   const cs = Math.floor((seconds - Math.floor(seconds)) * 100);
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;

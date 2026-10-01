@@ -27,7 +27,10 @@ export type JobStatus = {
 
 const norm = (v: unknown) => {
   const n = Number(v);
-  return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0;
+
+  return Number.isFinite(n)
+    ? Math.min(100, Math.max(0, Math.round(n)))
+    : 0;
 };
 
 export async function createJob({
@@ -38,20 +41,44 @@ export async function createJob({
   jobId: string;
 }): Promise<JobStatus> {
   const id = String(jobId || "").trim();
-  if (!id) throw new Error("jobId is required");
+
+  if (!id) {
+    throw new Error("jobId is required");
+  }
 
   await ensureJobSchema();
 
   const rows = await sql`
-    INSERT INTO captify_jobs (user_id, job_id, status, progress, message)
-    VALUES (${userId}, ${id}, 'queued', 0, 'Job created. Waiting for upload.')
+    INSERT INTO captify_jobs (
+      user_id,
+      job_id,
+      status,
+      progress,
+      message
+    )
+    VALUES (
+      ${userId},
+      ${id},
+      'queued',
+      0,
+      'Job created. Waiting for upload.'
+    )
     ON CONFLICT (job_id) DO NOTHING
-    RETURNING job_id, status, progress, message, error, clips
+    RETURNING
+      job_id,
+      status,
+      progress,
+      message,
+      error,
+      clips
   `;
 
-  if (!rows.length) throw new Error("Failed to create job");
+  if (!rows.length) {
+    throw new Error("Failed to create job");
+  }
 
   const r = rows[0];
+
   return {
     jobId: r.job_id,
     status: r.status,
@@ -67,7 +94,10 @@ export async function setJobStatus(
   patch: Partial<JobStatus>
 ): Promise<JobStatus> {
   const id = String(jobId || "").trim();
-  if (!id) throw new Error("jobId is required");
+
+  if (!id) {
+    throw new Error("jobId is required");
+  }
 
   await ensureJobSchema();
 
@@ -75,7 +105,12 @@ export async function setJobStatus(
   const progress = norm(patch.progress);
   const message = patch.message ?? null;
   const error = patch.error ?? null;
-  const clips = patch.clips ?? null;
+
+  // Neon/Postgres JSONB needs the array/object serialized explicitly.
+  const clips =
+    patch.clips !== undefined
+      ? JSON.stringify(patch.clips)
+      : null;
 
   const rows = await sql`
     UPDATE captify_jobs
@@ -86,14 +121,23 @@ export async function setJobStatus(
       error = ${error},
       clips = COALESCE(${clips}::jsonb, clips),
       completed_at = CASE
-        WHEN ${status} = 'done' THEN NOW()
+        WHEN ${status} = 'done'
+        THEN NOW()
         ELSE completed_at
       END
     WHERE job_id = ${id}
-    RETURNING job_id, status, progress, message, error, clips
+    RETURNING
+      job_id,
+      status,
+      progress,
+      message,
+      error,
+      clips
   `;
 
-  if (!rows.length) throw new Error("Job not found");
+  if (!rows.length) {
+    throw new Error("Job not found");
+  }
 
   const r = rows[0];
 
@@ -107,20 +151,33 @@ export async function setJobStatus(
   };
 }
 
-export async function getJobStatus(jobId: string): Promise<JobStatus | null> {
+export async function getJobStatus(
+  jobId: string
+): Promise<JobStatus | null> {
   const id = String(jobId || "").trim();
-  if (!id) return null;
+
+  if (!id) {
+    return null;
+  }
 
   await ensureJobSchema();
 
   const rows = await sql`
-    SELECT job_id, status, progress, message, error, clips
+    SELECT
+      job_id,
+      status,
+      progress,
+      message,
+      error,
+      clips
     FROM captify_jobs
     WHERE job_id = ${id}
     LIMIT 1
   `;
 
-  if (!rows.length) return null;
+  if (!rows.length) {
+    return null;
+  }
 
   const r = rows[0];
 
@@ -134,9 +191,14 @@ export async function getJobStatus(jobId: string): Promise<JobStatus | null> {
   };
 }
 
-export async function deleteJobStatus(jobId: string) {
+export async function deleteJobStatus(
+  jobId: string
+) {
   const id = String(jobId || "").trim();
-  if (!id) return false;
+
+  if (!id) {
+    return false;
+  }
 
   await ensureJobSchema();
 
@@ -149,6 +211,8 @@ export async function deleteJobStatus(jobId: string) {
   return rows.length > 0;
 }
 
-export async function hasJobStatus(jobId: string) {
+export async function hasJobStatus(
+  jobId: string
+) {
   return (await getJobStatus(jobId)) !== null;
 }

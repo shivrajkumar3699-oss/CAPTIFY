@@ -299,7 +299,7 @@ function buildFilterGraph(
     `[bg][fg]` +
       `overlay=x=(W-w)/2:y=(H-h)/2,` +
       `fade=t=in:st=0:d=0.4,` +
-      `ass='${escapedAss}',` +
+      `ass='${escapedAss}':shaping=complex,` +
       `format=yuv420p[v]`,
   ];
 
