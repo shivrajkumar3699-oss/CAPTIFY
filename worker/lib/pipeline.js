@@ -137,33 +137,63 @@ function getVideoInfo(videoPath) {
 // Raw clip
 // ------------------------------------------------------------
 
-function cutRawClip(
+async function cutRawClip(
   sourcePath,
   startTime,
   endTime,
   outputPath
 ) {
+  const duration = Math.max(
+    0.1,
+    Number(endTime) - Number(startTime)
+  );
+
+  console.log(\`[cutRawClip] source=\${sourcePath}\`);
+  console.log(
+    \`[cutRawClip] start=\${Number(startTime).toFixed(3)} duration=\${duration.toFixed(3)}\`
+  );
+
+  const info = await getVideoInfo(sourcePath);
+  const is4KOrLarger = Math.max(info.width, info.height) >= 2160;
+
   return new Promise((resolve, reject) => {
-    const duration = Math.max(
-      0.1,
-      Number(endTime) - Number(startTime)
-    );
-
-    console.log(`[cutRawClip] source=${sourcePath}`);
-    console.log(
-      `[cutRawClip] start=${Number(startTime).toFixed(3)} duration=${duration.toFixed(3)}`
-    );
-
     const command = ffmpeg(sourcePath)
       .setStartTime(Number(startTime))
       .setDuration(duration)
       .outputOptions([
         "-map", "0:v:0?",
         "-map", "0:a:0?",
-        "-c", "copy",
         "-avoid_negative_ts", "make_zero",
+      ]);
+
+    if (is4KOrLarger) {
+      console.log(
+        \`[cutRawClip] 4K source detected (\${info.width}x\${info.height}); creating 720x1280 low-memory intermediate\`
+      );
+
+      command
+        .videoFilters("scale=720:1280")
+        .videoCodec("libx264")
+        .audioCodec("aac")
+        .outputOptions([
+          "-threads", "1",
+          "-filter_threads", "1",
+          "-preset", "ultrafast",
+          "-tune", "zerolatency",
+          "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
+          "-crf", "26",
+          "-pix_fmt", "yuv420p",
+          "-b:a", "128k",
+          "-movflags", "+faststart",
+        ]);
+    } else {
+      command.outputOptions([
+        "-c", "copy",
         "-movflags", "+faststart",
-      ])
+      ]);
+    }
+
+    command
       .on("start", (commandLine) => {
         console.log("[cutRawClip] FFmpeg command:");
         console.log(commandLine);
@@ -175,28 +205,33 @@ function cutRawClip(
           line.includes("Invalid") ||
           line.includes("failed")
         ) {
-          console.error(`[cutRawClip] ${line}`);
+          console.error(\`[cutRawClip] \${line}\`);
         }
       })
       .on("end", () => {
         if (!require("fs").existsSync(outputPath)) {
-          return reject(new Error("FFmpeg finished but raw clip was not created"));
+          return reject(
+            new Error("FFmpeg finished but raw clip was not created")
+          );
         }
+
         const size = require("fs").statSync(outputPath).size;
+
         if (!size) {
           return reject(new Error("FFmpeg created an empty raw clip"));
         }
-        console.log(`[cutRawClip] Created: ${outputPath} (${size} bytes)`);
+
+        console.log(\`[cutRawClip] Created: \${outputPath} (\${size} bytes)\`);
         resolve(outputPath);
       })
       .on("error", (err, stdout, stderr) => {
         console.error("[cutRawClip] FFmpeg ERROR:", err.message);
-        if (stderr) console.error("[cutRawClip] FFmpeg STDERR:", stderr);
+        if (stderr) {
+          console.error("[cutRawClip] FFmpeg STDERR:", stderr);
+        }
         reject(err);
       })
       .save(outputPath);
-
-    return command;
   });
 }
 // ------------------------------------------------------------
