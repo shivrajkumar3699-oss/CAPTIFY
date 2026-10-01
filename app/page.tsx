@@ -390,6 +390,7 @@ export default function Home() {
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const renderWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isProcessing =
     status?.status === "queued" ||
@@ -466,6 +467,11 @@ export default function Home() {
     if (pollingRef.current) {
       clearTimeout(pollingRef.current as unknown as ReturnType<typeof setTimeout>);
       pollingRef.current = null;
+    }
+
+    if (renderWatchdogRef.current) {
+      clearInterval(renderWatchdogRef.current);
+      renderWatchdogRef.current = null;
     }
   }, []);
 
@@ -1094,6 +1100,7 @@ export default function Home() {
        */
       const uploadedSegments: typeof segments =
         [];
+      const uploadedHookFiles: File[] = [];
 
       for (
         let i = 0;
@@ -1171,6 +1178,7 @@ export default function Home() {
         uploadedSegments.push(
           segment
         );
+        uploadedHookFiles.push(hookFile);
       }
 
       /*
@@ -1184,6 +1192,21 @@ export default function Home() {
         message:
           "Rendering your selected clips..."
       });
+
+      let workerInstanceId = "";
+
+      try {
+        const healthResponse = await fetch(
+          workerBase + "/health",
+          { cache: "no-store" }
+        );
+        if (healthResponse.ok) {
+          const healthData = await healthResponse.json();
+          workerInstanceId = String(healthData.instanceId || "");
+        }
+      } catch (healthError) {
+        console.warn("Worker health check before render failed:", healthError);
+      }
 
       const renderResponse =
         await fetch(
@@ -1240,6 +1263,101 @@ export default function Home() {
       setUploadProgress(75);
 
       startPolling(newJobId);
+
+      let recoveryAttempts = 0;
+
+      renderWatchdogRef.current = window.setInterval(async () => {
+        if (terminalStatusRef.current || recoveryAttempts >= 2) {
+          return;
+        }
+
+        try {
+          const healthResponse = await fetch(
+            workerBase + "/health",
+            { cache: "no-store" }
+          );
+
+          if (!healthResponse.ok) return;
+
+          const healthData = await healthResponse.json();
+          const currentInstanceId = String(
+            healthData.instanceId || ""
+          );
+
+          if (
+            !workerInstanceId ||
+            !currentInstanceId ||
+            currentInstanceId === workerInstanceId
+          ) {
+            return;
+          }
+
+          recoveryAttempts += 1;
+          workerInstanceId = currentInstanceId;
+
+          setStatus({
+            jobId: newJobId,
+            status: "rendering",
+            progress: 75,
+            message:
+              "Render worker restarted. Rebuilding your clips automatically..."
+          });
+
+          for (
+            let i = 0;
+            i < uploadedHookFiles.length;
+            i++
+          ) {
+            await uploadChunks(
+              workerBase +
+                "/upload-clip/" +
+                encodeURIComponent(newJobId) +
+                "/" +
+                (i + 1),
+              uploadedHookFiles[i],
+              75,
+              75
+            );
+          }
+
+          const retryResponse = await fetch(
+            "/api/render-selected",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                jobId: newJobId,
+                selectedSegments: uploadedSegments,
+                options: {
+                  bgm,
+                  captionColor,
+                  numClips,
+                  audioLanguage: videoLanguage,
+                  captionLanguage,
+                  framing,
+                },
+              }),
+            }
+          );
+
+          if (!retryResponse.ok) {
+            const data = await retryResponse
+              .json()
+              .catch(() => ({}));
+            throw new Error(
+              data.error ||
+                "Automatic render recovery failed."
+            );
+          }
+        } catch (recoveryError) {
+          console.error(
+            "Automatic render recovery failed:",
+            recoveryError
+          );
+        }
+      }, 10000);
     } catch (err) {
       console.error(err);
 
