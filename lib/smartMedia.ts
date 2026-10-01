@@ -183,10 +183,12 @@ export async function trimVideoForUpload(
         codec: "avc",
         bitrate: 5_000_000,
         frameRate: 30,
-        // Do not force hardware encoding here.
-        // Some Chrome/Edge + GPU combinations reject this WebCodecs
-        // configuration with: "Unsupported configuration. Check isConfigSupported() prior to calling configure()."
-        // Leaving the setting unset lets WebCodecs choose a supported encoder.
+        // Prefer the software WebCodecs path. Some Windows/Chrome GPU
+        // combinations advertise H.264 support but fail when the hardware
+        // encoder/decoder is actually configured.
+        // This avoids the "Unsupported configuration. Check
+        // isConfigSupported() prior to calling configure()" failure.
+        hardwareAcceleration: "prefer-software",
         forceTranscode: true,
       },
       audio: {
