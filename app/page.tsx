@@ -436,20 +436,31 @@ export default function Home() {
 
   const isDone = status?.status === "done";
 
-  const rawProgress = isDone
-    ? 100
-    : isProcessing
-      ? Math.max(
-          uploadProgress,
-          Math.max(
-            0,
-            Math.min(
-              100,
-              Number(status?.progress ?? 0)
+  // The worker sends a final "Clip N of N completed" update immediately
+  // after the last edited clip is created. Treat that terminal render event
+  // as 100% even if a stale/intermediate 95% status reaches the browser first.
+  const lastClipCompleted =
+    status?.status === "rendering" &&
+    typeof status.message === "string" &&
+    /^Clip\s+\d+\s+of\s+\d+\s+completed$/i.test(
+      status.message.trim()
+    );
+
+  const rawProgress =
+    isDone || lastClipCompleted
+      ? 100
+      : isProcessing
+        ? Math.max(
+            uploadProgress,
+            Math.max(
+              0,
+              Math.min(
+                100,
+                Number(status?.progress ?? 0)
+              )
             )
           )
-        )
-      : uploadProgress;
+        : uploadProgress;
 
   const targetProgressRef = useRef(0);
   const [displayProgress, setDisplayProgress] = useState(0);
@@ -460,10 +471,11 @@ export default function Home() {
       Math.max(0, Math.min(100, rawProgress))
     );
 
-    if (isDone) {
+    if (isDone || lastClipCompleted) {
       targetProgressRef.current = 100;
+      setDisplayProgress(100);
     }
-  }, [rawProgress, isDone]);
+  }, [rawProgress, isDone, lastClipCompleted]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -485,7 +497,7 @@ export default function Home() {
           current + step
         );
       });
-    }, 2250);
+    }, 250);
 
     return () => window.clearInterval(timer);
   }, []);
