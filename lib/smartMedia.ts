@@ -11,6 +11,7 @@ import {
   Output,
   getFirstEncodableAudioCodec,
   getFirstEncodableVideoCodec,
+  QUALITY_MEDIUM,
 } from "mediabunny";
 import { registerMp3Encoder } from "@mediabunny/mp3-encoder";
 
@@ -214,7 +215,7 @@ export async function trimVideoForUpload(
       resizedHeight = Math.max(
         2,
         Math.round(
-          (1080 / Math.max(1, sourceWidth)) *
+          (720 / Math.max(1, sourceWidth)) *
             sourceHeight /
             2,
         ) * 2,
@@ -222,11 +223,11 @@ export async function trimVideoForUpload(
 
       browserVideoCodec =
         await getFirstEncodableVideoCodec(
-          ["avc"],
+          output.format.getSupportedVideoCodecs(),
           {
-            width: 1080,
+            width: 720,
             height: resizedHeight,
-            bitrate: 5_000_000,
+            quality: QUALITY_MEDIUM,
           },
         );
 
@@ -249,12 +250,12 @@ export async function trimVideoForUpload(
         ? {
             // Keep the complete 4K hook while reducing its encoded size
             // before it reaches the Render worker.
-            width: 1080,
+            width: 720,
             height: resizedHeight!,
             fit: "contain",
             codec: browserVideoCodec!,
-            bitrate: 5_000_000,
-            hardwareAcceleration: "prefer-software",
+            quality: QUALITY_MEDIUM,
+            forceTranscode: true,
           }
         : undefined,
 
