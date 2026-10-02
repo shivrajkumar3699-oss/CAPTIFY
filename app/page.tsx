@@ -475,11 +475,21 @@ export default function Home() {
   // The worker sends a final "Clip N of N completed" update immediately
   // after the last edited clip is created. Treat that terminal render event
   // as 100% even if a stale/intermediate 95% status reaches the browser first.
-  const lastClipCompleted =
+  const lastClipCompletedMatch =
     status?.status === "rendering" &&
-    typeof status.message === "string" &&
-    /^Clip\s+\d+\s+of\s+\d+\s+completed$/i.test(
-      status.message.trim()
+    typeof status.message === "string"
+      ? status.message.trim().match(
+          /^Clip\s+(\d+)\s+of\s+(\d+)\s+completed$/i
+        )
+      : null;
+
+  // Only the FINAL clip may force the UI to 100%.
+  // Clip 1/4, 2/4 or 3/4 must never make the progress bar jump to 100%.
+  const lastClipCompleted =
+    Boolean(
+      lastClipCompletedMatch &&
+      Number(lastClipCompletedMatch[1]) ===
+        Number(lastClipCompletedMatch[2])
     );
 
   const rawProgress =
