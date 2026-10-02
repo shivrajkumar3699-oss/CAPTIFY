@@ -310,21 +310,21 @@ function buildFilterGraph(
     }
 
     videoChain =
-      \`crop=\${cropW}:\${cropH},\` +
-      \`scale=\${targetWidth}:\${targetHeight}\`;
+      `crop=${cropW}:${cropH},` +
+      `scale=${targetWidth}:${targetHeight}`;
   } else {
     videoChain =
-      \`scale=\${targetWidth}:\${targetHeight}:\` +
-      \`force_original_aspect_ratio=decrease,\` +
-      \`pad=\${targetWidth}:\${targetHeight}:\` +
-      \`(ow-iw)/2:(oh-ih)/2:color=black\`;
+      `scale=${targetWidth}:${targetHeight}:` +
+      `force_original_aspect_ratio=decrease,` +
+      `pad=${targetWidth}:${targetHeight}:` +
+      `(ow-iw)/2:(oh-ih)/2:color=black`;
   }
 
   const filters = [
-    \`[0:v]\${videoChain},\` +
-      \`fade=t=in:st=0:d=0.4,\` +
-      \`ass='\${escapedAss}':shaping=complex,\` +
-      \`format=yuv420p[v]\`,
+    `[0:v]${videoChain},` +
+      `fade=t=in:st=0:d=0.4,` +
+      `ass='${escapedAss}':shaping=complex,` +
+      `format=yuv420p[v]`,
   ];
 
   // Audio
@@ -335,10 +335,10 @@ function buildFilterGraph(
     ).toFixed(2);
 
     const bgmBase =
-      \`[1:a]\` +
-      \`volume=\${BGM_VOLUME},\` +
-      \`afade=t=in:st=0:d=1,\` +
-      \`afade=t=out:st=\${fadeOutStart}:d=1.5\`;
+      `[1:a]` +
+      `volume=${BGM_VOLUME},` +
+      `afade=t=in:st=0:d=1,` +
+      `afade=t=out:st=${fadeOutStart}:d=1.5`;
 
     if (info.hasAudio) {
       filters.push(
@@ -346,17 +346,17 @@ function buildFilterGraph(
       );
 
       filters.push(
-        \`\${bgmBase}[bgm0]\`
+        `${bgmBase}[bgm0]`
       );
 
       filters.push(
-        \`[bgm0][sc]\` +
-          \`sidechaincompress=\` +
-          \`threshold=\${DUCK_THRESHOLD}:\` +
-          \`ratio=\${DUCK_RATIO}:\` +
-          \`attack=30:\` +
-          \`release=500\` +
-          \`[bgmd]\`
+        `[bgm0][sc]` +
+          `sidechaincompress=` +
+          `threshold=${DUCK_THRESHOLD}:` +
+          `ratio=${DUCK_RATIO}:` +
+          `attack=30:` +
+          `release=500` +
+          `[bgmd]`
       );
 
       filters.push(
@@ -370,11 +370,11 @@ function buildFilterGraph(
       );
     } else {
       filters.push(
-        \`\${bgmBase},\` +
-          \`atrim=duration=\${Number(
+        `${bgmBase},` +
+          `atrim=duration=${Number(
             clipDuration
-          ).toFixed(2)}\` +
-          \`[a]\`
+          ).toFixed(2)}` +
+          `[a]`
       );
     }
   }
@@ -414,11 +414,11 @@ async function buildEditedClip(
       : "1080x1920";
 
   console.log(
-    \`[buildEditedClip] source=\${info.width}x\${info.height} \` +
-      \`target=\${targetLabel} \` +
-      \`framing=\${mode} \` +
-      \`bgm=\${bgmPath ? "yes" : "no"} \` +
-      \`duration=\${Number(clipDuration).toFixed(1)}s\`
+    `[buildEditedClip] source=${info.width}x${info.height} ` +
+      `target=${targetLabel} ` +
+      `framing=${mode} ` +
+      `bgm=${bgmPath ? "yes" : "no"} ` +
+      `duration=${Number(clipDuration).toFixed(1)}s`
   );
 
   console.log(
@@ -537,7 +537,7 @@ async function buildEditedClip(
           line.includes("Killed")
         ) {
           console.error(
-            \`[buildEditedClip] \${line}\`
+            `[buildEditedClip] ${line}`
           );
         }
       })
@@ -563,7 +563,7 @@ async function buildEditedClip(
         }
 
         console.log(
-          \`[buildEditedClip] Created: \${outputPath} (\${size} bytes)\`
+          `[buildEditedClip] Created: ${outputPath} (${size} bytes)`
         );
 
         resolve(outputPath);
