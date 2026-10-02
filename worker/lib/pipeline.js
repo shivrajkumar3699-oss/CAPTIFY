@@ -266,116 +266,68 @@ function buildFilterGraph(
   const srcW = Number(info.width);
   const srcH = Number(info.height);
 
-  // Render's free instance is intentionally tiny.  A 4K source can make
-  // FFmpeg hold very large decoded frames while adding captions, which can
-  // cause the free instance to be restarted during the first render clip.
-  // For 4K-or-larger sources, render a 720x1280 deliverable; 1080p sources
-  // keep the normal 1080x1920 output. This keeps the 9:16 result usable while
-  // dramatically reducing the peak memory required by FFmpeg.
-  const targetWidth =
-    Math.max(srcW, srcH) >= 2160
-      ? 720
-      : VIDEO_WIDTH;
-  const targetHeight =
-    Math.max(srcW, srcH) >= 2160
-      ? 1280
-      : VIDEO_HEIGHT;
-
   if (
     !Number.isFinite(srcW) ||
     !Number.isFinite(srcH) ||
     srcW <= 0 ||
     srcH <= 0
   ) {
-    throw new Error(
-      "Invalid source video dimensions"
-    );
+    throw new Error("Invalid source video dimensions");
   }
 
-  let fgChain;
+  // Render targets:
+  // 4K+ source -> 720x1280
+  // everything else -> 1080x1920
+  //
+  // IMPORTANT:
+  // Never split the video into a blurred background + foreground.
+  // That duplicates decoded frames and causes heavy memory pressure.
+  const is4KOrLarger =
+    Math.max(srcW, srcH) >= 2160;
+
+  const targetWidth =
+    is4KOrLarger ? 720 : VIDEO_WIDTH;
+
+  const targetHeight =
+    is4KOrLarger ? 1280 : VIDEO_HEIGHT;
+
+  let videoChain;
 
   if (framing === "fill") {
-    const cropW = evenFloor(
-      Math.min(
-        srcW,
-        (srcH * VIDEO_WIDTH) /
-          VIDEO_HEIGHT
-      )
-    );
+    const targetAspect =
+      targetWidth / targetHeight;
 
-    const cropH = evenFloor(
-      Math.min(
-        srcH,
-        (srcW * VIDEO_HEIGHT) /
-          VIDEO_WIDTH
-      )
-    );
+    const sourceAspect =
+      srcW / srcH;
 
-    fgChain =
-      `crop=${cropW}:${cropH},` +
-      `scale=${targetWidth}:${targetHeight}`;
+    let cropW = srcW;
+    let cropH = srcH;
+
+    if (sourceAspect > targetAspect) {
+      cropW = evenFloor(srcH * targetAspect);
+    } else {
+      cropH = evenFloor(srcW / targetAspect);
+    }
+
+    videoChain =
+      \`crop=\${cropW}:\${cropH},\` +
+      \`scale=\${targetWidth}:\${targetHeight}\`;
   } else {
-    const fit = Math.min(
-      targetWidth / srcW,
-      targetHeight / srcH
-    );
-
-    const fitW = evenRound(srcW * fit);
-    const fitH = evenRound(srcH * fit);
-
-    fgChain =
-      `scale=${fitW}:${fitH}`;
+    videoChain =
+      \`scale=\${targetWidth}:\${targetHeight}:\` +
+      \`force_original_aspect_ratio=decrease,\` +
+      \`pad=\${targetWidth}:\${targetHeight}:\` +
+      \`(ow-iw)/2:(oh-ih)/2:color=black\`;
   }
 
-  // Native 9:16 sources do not need a duplicated blurred background.
-  // Avoiding split/overlay greatly reduces FFmpeg memory usage on Render.
-  const sourceIsVertical =
-    Math.abs(srcW / srcH - targetWidth / targetHeight) < 0.01;
+  const filters = [
+    \`[0:v]\${videoChain},\` +
+      \`fade=t=in:st=0:d=0.4,\` +
+      \`ass='\${escapedAss}':shaping=complex,\` +
+      \`format=yuv420p[v]\`,
+  ];
 
-  const filters = [];
-
-  if (sourceIsVertical) {
-    filters.push(
-      `[0:v]${fgChain},` +
-        `fade=t=in:st=0:d=0.4,` +
-        `ass='${escapedAss}':shaping=complex,` +
-        `format=yuv420p[v]`
-    );
-  } else {
-    filters.push(
-      "[0:v]split=2[bgsrc][fgsrc]"
-    );
-
-    filters.push(
-      `[bgsrc]` +
-        `crop=trunc(iw*0.94/2)*2:` +
-        `trunc(ih*0.94/2)*2,` +
-        `scale=180:320:` +
-        `force_original_aspect_ratio=increase,` +
-        `crop=180:320,` +
-        `gblur=sigma=8,` +
-        `scale=${targetWidth}:${targetHeight},` +
-        `eq=brightness=-0.1` +
-        `[bg]`
-    );
-
-    filters.push(
-      `[fgsrc]${fgChain}[fg]`
-    );
-
-    filters.push(
-      "[bg][fg]" +
-        `overlay=x=(W-w)/2:y=(H-h)/2,` +
-        `fade=t=in:st=0:d=0.4,` +
-        `ass='${escapedAss}':shaping=complex,` +
-        `format=yuv420p[v]`
-    );
-  }
-
-  // ----------------------------------------------------------
   // Audio
-  // ----------------------------------------------------------
-
   if (hasBgm) {
     const fadeOutStart = Math.max(
       0,
@@ -383,10 +335,10 @@ function buildFilterGraph(
     ).toFixed(2);
 
     const bgmBase =
-      `[1:a]` +
-      `volume=${BGM_VOLUME},` +
-      `afade=t=in:st=0:d=1,` +
-      `afade=t=out:st=${fadeOutStart}:d=1.5`;
+      \`[1:a]\` +
+      \`volume=\${BGM_VOLUME},\` +
+      \`afade=t=in:st=0:d=1,\` +
+      \`afade=t=out:st=\${fadeOutStart}:d=1.5\`;
 
     if (info.hasAudio) {
       filters.push(
@@ -394,17 +346,17 @@ function buildFilterGraph(
       );
 
       filters.push(
-        `${bgmBase}[bgm0]`
+        \`\${bgmBase}[bgm0]\`
       );
 
       filters.push(
-        `[bgm0][sc]` +
-          `sidechaincompress=` +
-          `threshold=${DUCK_THRESHOLD}:` +
-          `ratio=${DUCK_RATIO}:` +
-          `attack=30:` +
-          `release=500` +
-          `[bgmd]`
+        \`[bgm0][sc]\` +
+          \`sidechaincompress=\` +
+          \`threshold=\${DUCK_THRESHOLD}:\` +
+          \`ratio=\${DUCK_RATIO}:\` +
+          \`attack=30:\` +
+          \`release=500\` +
+          \`[bgmd]\`
       );
 
       filters.push(
@@ -418,11 +370,11 @@ function buildFilterGraph(
       );
     } else {
       filters.push(
-        `${bgmBase},` +
-          `atrim=duration=${Number(
+        \`\${bgmBase},\` +
+          \`atrim=duration=\${Number(
             clipDuration
-          ).toFixed(2)}` +
-          `[a]`
+          ).toFixed(2)}\` +
+          \`[a]\`
       );
     }
   }
@@ -432,6 +384,8 @@ function buildFilterGraph(
 
 // ------------------------------------------------------------
 // Edited clip
+// ------------------------------------------------------------
+
 // ------------------------------------------------------------
 
 async function buildEditedClip(
@@ -448,238 +402,194 @@ async function buildEditedClip(
       ? "fill"
       : "fit";
 
-  /*
-   * IMPORTANT FOR RENDER FREE:
-   * Browser uploads can contain the original 4K hook. Do not feed that
-   * 2160x3840 file directly into the caption filtergraph. First create a
-   * small 720x1280 intermediate, then run the caption render against that
-   * lightweight file. This prevents the free Render instance from being
-   * forced to keep 4K frames through ASS/filter processing.
-   */
-  let renderInputPath = rawClipPath;
-  let temporaryScaledPath = null;
+  const info =
+    await getVideoInfo(rawClipPath);
 
-  const rawInfo = await getVideoInfo(rawClipPath);
-  const rawIs4KOrLarger =
-    Math.max(rawInfo.width, rawInfo.height) >= 2160;
+  const is4KOrLarger =
+    Math.max(info.width, info.height) >= 2160;
 
-  if (rawIs4KOrLarger) {
-    temporaryScaledPath =
-      rawClipPath + ".render-720.mp4";
+  const targetLabel =
+    is4KOrLarger
+      ? "720x1280"
+      : "1080x1920";
+
+  console.log(
+    \`[buildEditedClip] source=\${info.width}x\${info.height} \` +
+      \`target=\${targetLabel} \` +
+      \`framing=\${mode} \` +
+      \`bgm=\${bgmPath ? "yes" : "no"} \` +
+      \`duration=\${Number(clipDuration).toFixed(1)}s\`
+  );
+
+  console.log(
+    "[buildEditedClip] ASS:",
+    assPath
+  );
+
+  return new Promise((resolve, reject) => {
+    let filters;
 
     try {
-      if (fs.existsSync(temporaryScaledPath)) {
-        fs.unlinkSync(temporaryScaledPath);
-      }
-    } catch {}
+      filters = buildFilterGraph(
+        info,
+        mode,
+        escapePathForFilter(assPath),
+        !!bgmPath,
+        clipDuration
+      );
+    } catch (error) {
+      return reject(error);
+    }
 
-    console.log(
-      `[buildEditedClip] 4K input detected (${rawInfo.width}x${rawInfo.height}); pre-scaling to 720x1280 before caption render`
-    );
+    const command =
+      ffmpeg(rawClipPath);
 
-    await cutRawClip(
-      rawClipPath,
-      0,
-      Number(clipDuration),
-      temporaryScaledPath
-    );
+    if (bgmPath) {
+      command.input(bgmPath);
+    }
 
-    renderInputPath = temporaryScaledPath;
-  }
+    // Render free-tier safety:
+    // one video chain, one x264 thread, no duplicated 4K frames.
+    command.outputOptions([
+      "-threads", "1",
+      "-filter_threads", "1",
+      "-filter_complex_threads", "1",
+    ]);
 
-  return getVideoInfo(renderInputPath).then(
-    (info) =>
-      new Promise((resolve, reject) => {
-        const cleanupTemporaryInput = () => {
-          if (!temporaryScaledPath) return;
+    const maps = bgmPath
+      ? [
+          "-map",
+          "[v]",
+          "-map",
+          "[a]",
+        ]
+      : [
+          "-map",
+          "[v]",
+          "-map",
+          "0:a?",
+        ];
 
-          try {
-            if (fs.existsSync(temporaryScaledPath)) {
-              fs.unlinkSync(temporaryScaledPath);
-            }
-          } catch (cleanupError) {
-            console.warn(
-              "[buildEditedClip] temporary 720p cleanup failed:",
-              cleanupError?.message || cleanupError
-            );
-          }
-        };
+    command
+      .complexFilter(filters)
+      .outputOptions(maps)
+      .videoCodec("libx264")
+      .audioCodec("aac")
+      .outputOptions([
+        "-threads",
+        "1",
 
-        const escapedAss =
-          escapePathForFilter(assPath);
+        "-preset",
+        "ultrafast",
 
-        const filters =
-          buildFilterGraph(
-            info,
-            mode,
-            escapedAss,
-            !!bgmPath,
-            clipDuration
+        "-tune",
+        "zerolatency",
+
+        "-x264-params",
+        "rc-lookahead=0:ref=1:bframes=0",
+
+        "-crf",
+        is4KOrLarger ? "26" : "23",
+
+        "-pix_fmt",
+        "yuv420p",
+
+        "-b:a",
+        "128k",
+
+        "-shortest",
+
+        "-movflags",
+        "+faststart",
+
+        "-avoid_negative_ts",
+        "make_zero",
+      ])
+
+      .on("start", (commandLine) => {
+        console.log(
+          "[buildEditedClip] FFmpeg command:"
+        );
+        console.log(commandLine);
+        onProgress?.(0);
+      })
+
+      .on("progress", (progress) => {
+        const percent =
+          Number(progress?.percent);
+
+        if (Number.isFinite(percent)) {
+          onProgress?.(
+            Math.max(
+              0,
+              Math.min(100, percent)
+            )
           );
+        }
+      })
 
-        const is4KOrLarger =
-          Math.max(info.width, info.height) >= 2160;
+      .on("stderr", (line) => {
+        if (
+          line.includes("Error") ||
+          line.includes("error") ||
+          line.includes("Invalid") ||
+          line.includes("failed") ||
+          line.includes("Killed")
+        ) {
+          console.error(
+            \`[buildEditedClip] \${line}\`
+          );
+        }
+      })
 
-        const targetLabel =
-          is4KOrLarger ? "720x1280" : "1080x1920";
-
-        console.log(
-          `[buildEditedClip] ` +
-            `source=${info.width}x${info.height} ` +
-            `target=${targetLabel} ` +
-            `framing=${mode} ` +
-            `bgm=${bgmPath ? "yes" : "no"} ` +
-            `duration=${Number(
-              clipDuration
-            ).toFixed(1)}s`
-        );
-
-        console.log(
-          "[buildEditedClip] ASS:",
-          assPath
-        );
-
-        const command = ffmpeg(renderInputPath);
-
-        // The BGM filtergraph uses [1:a], so the music file must be
-        // explicitly added as FFmpeg input #1.
-        if (bgmPath) {
-          command.input(bgmPath);
+      .on("end", () => {
+        if (!fs.existsSync(outputPath)) {
+          return reject(
+            new Error(
+              "FFmpeg finished but edited clip was not created"
+            )
+          );
         }
 
-        // Render with bounded CPU/thread usage on Render free instances.
-        command.outputOptions([
-          "-threads", "1",
-          "-filter_threads", "1",
-          "-filter_complex_threads", "1",
-        ]);
+        const size =
+          fs.statSync(outputPath).size;
 
-        const maps = bgmPath
-          ? [
-              "-map",
-              "[v]",
-              "-map",
-              "[a]",
-            ]
-          : [
-              "-map",
-              "[v]",
-              "-map",
-              "0:a?",
-            ];
+        if (!size) {
+          return reject(
+            new Error(
+              "FFmpeg created an empty edited clip"
+            )
+          );
+        }
 
-        command
-          .complexFilter(filters)
-          .outputOptions(maps)
+        console.log(
+          \`[buildEditedClip] Created: \${outputPath} (\${size} bytes)\`
+        );
 
-          .videoCodec("libx264")
-          .audioCodec("aac")
-
-          .outputOptions([
-            // Keep x264 memory usage bounded on Render.
-            "-threads",
-            "1",
-
-            "-preset",
-            "ultrafast",
-
-            "-tune",
-            "zerolatency",
-
-            "-x264-params",
-            "rc-lookahead=0:ref=1:bframes=0",
-
-            "-crf",
-            "23",
-
-            "-pix_fmt",
-            "yuv420p",
-
-            "-b:a",
-            "160k",
-
-            "-shortest",
-
-            "-movflags",
-            "+faststart",
-
-            "-avoid_negative_ts",
-            "make_zero",
-          ])
-
-          .on("start", (commandLine) => {
-            console.log(
-              "[buildEditedClip] FFmpeg command:"
-            );
-            console.log(commandLine);
-            onProgress?.(0);
-          })
-          .on("progress", (progress) => {
-            const percent = Number(progress?.percent);
-            if (Number.isFinite(percent)) {
-              onProgress?.(
-                Math.max(0, Math.min(100, percent))
-              );
-            }
-          })
-
-          .on("stderr", (line) => {
-            if (
-              line.includes("Error") ||
-              line.includes("error") ||
-              line.includes("Invalid") ||
-              line.includes("failed")
-            ) {
-              console.error(
-                `[buildEditedClip] ${line}`
-              );
-            }
-          })
-
-          .on("end", () => {
-            if (
-              !require("fs").existsSync(
-                outputPath
-              )
-            ) {
-              return reject(
-                new Error(
-                  "FFmpeg finished but edited clip was not created"
-                )
-              );
-            }
-
-            console.log(
-              `[buildEditedClip] Created: ${outputPath}`
-            );
-
-            cleanupTemporaryInput();
-            resolve(outputPath);
-          })
-
-          .on(
-            "error",
-            (err, stdout, stderr) => {
-              console.error(
-                "[buildEditedClip] FFmpeg ERROR:",
-                err.message
-              );
-
-              if (stderr) {
-                console.error(
-                  "[buildEditedClip] FFmpeg STDERR:"
-                );
-                console.error(stderr);
-              }
-
-              cleanupTemporaryInput();
-              reject(err);
-            }
-          )
-
-          .save(outputPath);
+        resolve(outputPath);
       })
-  );
+
+      .on(
+        "error",
+        (err, stdout, stderr) => {
+          console.error(
+            "[buildEditedClip] FFmpeg ERROR:",
+            err?.message || err
+          );
+
+          if (stderr) {
+            console.error(
+              "[buildEditedClip] FFmpeg STDERR:"
+            );
+            console.error(stderr);
+          }
+
+          reject(err);
+        }
+      )
+
+      .save(outputPath);
+  });
 }
 
 // ------------------------------------------------------------
