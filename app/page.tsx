@@ -10,6 +10,7 @@ import {
 import {
   extractSpeechAudio,
   getMediaDuration,
+  getVideoResolution,
   trimVideoForUpload,
 } from "@/lib/smartMedia";
 
@@ -142,6 +143,17 @@ function getStatusLabel(status: JobStatus["status"]) {
     default:
       return "Processing";
   }
+}
+
+function formatResolution(width: number, height: number) {
+  const longSide = Math.max(width, height);
+  if (longSide >= 7680) return "16K";
+  if (longSide >= 4320) return "8K";
+  if (longSide >= 3840) return "4K";
+  if (longSide >= 2560) return "1440p";
+  if (longSide >= 1920) return "1080p";
+  if (longSide >= 1280) return "720p";
+  return width + "×" + height;
 }
 
 function validateFile(file: File) {
@@ -387,6 +399,7 @@ export default function Home() {
   const [copied, setCopied] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const cancelRequestedRef = useRef(false);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -560,16 +573,61 @@ export default function Home() {
   );
 
   const handleFile = useCallback(
-    (selectedFile: File | null) => {
+    async (selectedFile: File | null) => {
       if (!selectedFile) return;
 
-      const validationError =
-        validateFile(selectedFile);
+      const validationError = validateFile(selectedFile);
 
       if (validationError) {
         setError(validationError);
         setFile(null);
         return;
+      }
+
+      const extension = getExtension(selectedFile.name);
+
+      if (extension === "mp4" || extension === "mkv") {
+        try {
+          const resolution = await getVideoResolution(selectedFile);
+
+          if (
+            resolution &&
+            Math.max(resolution.width, resolution.height) > 1920
+          ) {
+            const label = formatResolution(
+              resolution.width,
+              resolution.height
+            );
+
+            setError(
+              label +
+                " video (" +
+                resolution.width +
+                "×" +
+                resolution.height +
+                ") is not supported. Please use a 1080p resolution video (1920×1080 or lower)."
+            );
+            setFile(null);
+
+            if (inputRef.current) {
+              inputRef.current.value = "";
+            }
+
+            return;
+          }
+        } catch (resolutionError) {
+          console.error("Resolution check failed:", resolutionError);
+          setError(
+            "Could not read this video's resolution. Please use an MP4 or MKV video at 1080p resolution or lower."
+          );
+          setFile(null);
+
+          if (inputRef.current) {
+            inputRef.current.value = "";
+          }
+
+          return;
+        }
       }
 
       setError("");
@@ -599,7 +657,7 @@ export default function Home() {
     event.preventDefault();
     setIsDragging(false);
 
-    handleFile(
+    void handleFile(
       event.dataTransfer.files?.[0] || null
     );
   };
@@ -1423,6 +1481,7 @@ ${timeRange(
   };
 
   const startOver = () => {
+    cancelRequestedRef.current = true;
     stopPolling();
 
     setFile(null);
@@ -1447,6 +1506,8 @@ ${timeRange(
   };
 
   const removeFile = () => {
+    cancelRequestedRef.current = true;
+    stopPolling();
     setFile(null);
     setStatus(null);
     setJobId("");
@@ -1774,6 +1835,17 @@ ${timeRange(
                   </div>
                 ) : (
                   <div className="rounded-[30px] border border-white/[0.10] bg-black/[0.20] p-5">
+                    {isProcessing && (
+                      <button
+                        type="button"
+                        onClick={startOver}
+                        className="mb-4 flex min-h-14 w-full items-center justify-center rounded-2xl border-2 border-[#F7D002]/60 bg-[#F7D002] px-6 py-3 text-sm font-black uppercase tracking-[0.18em] text-black shadow-[0_0_28px_rgba(247,208,2,.32)] transition hover:scale-[1.01] hover:shadow-[0_0_38px_rgba(247,208,2,.48)] active:scale-[0.99] sm:ml-auto sm:w-auto sm:min-w-[150px]"
+                      >
+                        <span className="drop-shadow-[0_0_8px_rgba(0,0,0,.25)]">
+                          Cancel
+                        </span>
+                      </button>
+                    )}
                     <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
                       <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-[22px] border border-[#F7D002]/20 bg-[#F7D002]/[0.07] text-[#F7D002]">
                         <div className="absolute inset-0 bg-[radial-gradient(circle,rgba(247,208,2,.18),transparent_65%)]" />
