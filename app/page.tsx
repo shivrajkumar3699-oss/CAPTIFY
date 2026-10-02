@@ -550,6 +550,8 @@ export default function Home() {
 
   const renderStartedAtRef = useRef(0);
   const renderEtaRef = useRef<number | null>(null);
+  const renderEtaLastUpdatedAtRef = useRef(0);
+  const renderTotalRef = useRef<number | null>(null);
   const [renderEta, setRenderEta] = useState<number | null>(null);
   const [renderElapsed, setRenderElapsed] = useState(0);
   const [renderTotal, setRenderTotal] = useState<number | null>(null);
@@ -558,28 +560,39 @@ export default function Home() {
     status?.status === "rendering" &&
     typeof status.message === "string"
       ? status.message.match(
-          /^(?:Rendering clip\s+(\d+)\s+of\s+(\d+)|Clip\s+(\d+)\s+of\s+(\d+)\s+completed)$/i
+          /^(?:Preparing hook\s+(\d+)\s+of\s+(\d+)|Rendering clip\s+(\d+)\s+of\s+(\d+)|Clip\s+(\d+)\s+of\s+(\d+)\s+completed)/i
         )
       : null;
 
   const renderClipNumber = renderStatusMatch
     ? Number(
         renderStatusMatch[1] ||
-          renderStatusMatch[3]
+          renderStatusMatch[3] ||
+          renderStatusMatch[5]
       )
     : null;
 
   const renderClipTotal = renderStatusMatch
     ? Number(
         renderStatusMatch[2] ||
-          renderStatusMatch[4]
+          renderStatusMatch[4] ||
+          renderStatusMatch[6]
       )
     : null;
+
+  const isPreparingHook =
+    status?.status === "rendering" &&
+    typeof status.message === "string" &&
+    /^Preparing hook\s+\d+\s+of\s+\d+/i.test(
+      status.message
+    );
 
   useEffect(() => {
     if (status?.status !== "rendering") {
       renderStartedAtRef.current = 0;
       renderEtaRef.current = null;
+      renderEtaLastUpdatedAtRef.current = 0;
+      renderTotalRef.current = null;
       setRenderEta(null);
       setRenderElapsed(0);
       setRenderTotal(null);
@@ -593,9 +606,10 @@ export default function Home() {
     const updateRenderTiming = () => {
       if (!renderStartedAtRef.current) return;
 
+      const now = Date.now();
       const elapsedSeconds = Math.max(
         0,
-        (Date.now() - renderStartedAtRef.current) / 1000
+        (now - renderStartedAtRef.current) / 1000
       );
 
       setRenderElapsed(elapsedSeconds);
@@ -608,17 +622,56 @@ export default function Home() {
       const completedProgress = currentProgress - 50;
 
       if (completedProgress >= 1 && elapsedSeconds >= 2) {
-        const estimatedTotalSeconds =
+        const freshTotal =
           elapsedSeconds * (45 / completedProgress);
 
-        const remainingSeconds = Math.max(
-          1,
-          Math.ceil(estimatedTotalSeconds - elapsedSeconds)
+        if (renderTotalRef.current === null) {
+          renderTotalRef.current = freshTotal;
+        } else {
+          // Never let a new progress sample make the remaining time jump up.
+          renderTotalRef.current = Math.min(
+            renderTotalRef.current,
+            freshTotal
+          );
+        }
+
+        const totalSeconds = Math.max(
+          elapsedSeconds + 1,
+          renderTotalRef.current
         );
 
-        renderEtaRef.current = remainingSeconds;
-        setRenderEta(remainingSeconds);
-        setRenderTotal(estimatedTotalSeconds);
+        const previousEta =
+          renderEtaRef.current;
+
+        const previousUpdatedAt =
+          renderEtaLastUpdatedAtRef.current;
+
+        const elapsedSinceLastEta =
+          previousUpdatedAt > 0
+            ? (now - previousUpdatedAt) / 1000
+            : 0;
+
+        const calculatedEta = Math.max(
+          1,
+          Math.ceil(totalSeconds - elapsedSeconds)
+        );
+
+        // ETA is monotonic: it can decrease, but never jump from 3m to 7m.
+        const nextEta =
+          previousEta === null
+            ? calculatedEta
+            : Math.max(
+                1,
+                Math.min(
+                  previousEta - Math.max(0, elapsedSinceLastEta),
+                  calculatedEta
+                )
+              );
+
+        renderEtaRef.current = Math.ceil(nextEta);
+        renderEtaLastUpdatedAtRef.current = now;
+        setRenderEta(Math.ceil(nextEta));
+        setRenderTotal(totalSeconds);
       }
     };
 
@@ -2753,7 +2806,9 @@ ${timeRange(
                             <p className="mt-1 text-[11px] font-bold text-white/65">
                               {renderEta
                                 ? formatTime(renderEta)
-                                : "--:--"}
+                                : isPreparingHook
+                                  ? "Calculating..."
+                                  : "--:--"}
                             </p>
                           </div>
                           <div className="rounded-xl border border-white/[0.05] bg-white/[0.025] px-2.5 py-2">
