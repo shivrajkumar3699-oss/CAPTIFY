@@ -55,7 +55,7 @@ function containsDevanagari(text) {
   return /[\u0900-\u097F]/.test(String(text));
 }
 
-function buildAssHeader(fontName, marginV = 60) {
+function buildAssHeader(fontName, marginV = 190) {
   const whiteColor = "&H00FFFFFF";
   const outlineColor = "&H00000000";
   return `[Script Info]
