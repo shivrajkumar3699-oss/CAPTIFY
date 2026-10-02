@@ -551,12 +551,14 @@ export default function Home() {
   const renderStartedAtRef = useRef(0);
   const renderEtaRef = useRef<number | null>(null);
   const [renderEta, setRenderEta] = useState<number | null>(null);
+  const [renderElapsed, setRenderElapsed] = useState(0);
+  const [renderTotal, setRenderTotal] = useState<number | null>(null);
 
   const renderStatusMatch =
     status?.status === "rendering" &&
     typeof status.message === "string"
       ? status.message.match(
-          /^(?:Rendering clip\s+(\\d+)\s+of\s+(\\d+)|Clip\s+(\\d+)\s+of\s+(\\d+)\s+completed)$/i
+          /^(?:Rendering clip\s+(\d+)\s+of\s+(\d+)|Clip\s+(\d+)\s+of\s+(\d+)\s+completed)$/i
         )
       : null;
 
@@ -579,105 +581,53 @@ export default function Home() {
       renderStartedAtRef.current = 0;
       renderEtaRef.current = null;
       setRenderEta(null);
+      setRenderElapsed(0);
+      setRenderTotal(null);
       return;
     }
 
     if (!renderStartedAtRef.current) {
       renderStartedAtRef.current = Date.now();
-      return;
     }
 
-    const currentProgress = Math.max(
-      50,
-      Math.min(
-        95,
-        Number(status.progress) || 50
-      )
-    );
+    const updateRenderTiming = () => {
+      if (!renderStartedAtRef.current) return;
 
-    const elapsedSeconds =
-      (Date.now() - renderStartedAtRef.current) /
-      1000;
-
-    const completedProgress =
-      currentProgress - 50;
-
-    if (
-      completedProgress >= 1 &&
-      elapsedSeconds >= 2
-    ) {
-      const estimatedTotalSeconds =
-        elapsedSeconds *
-        (45 / completedProgress);
-
-      const remainingSeconds = Math.max(
-        1,
-        Math.ceil(
-          estimatedTotalSeconds -
-            elapsedSeconds
-        )
+      const elapsedSeconds = Math.max(
+        0,
+        (Date.now() - renderStartedAtRef.current) / 1000
       );
 
-      renderEtaRef.current =
-        remainingSeconds;
-      setRenderEta(remainingSeconds);
-    }
-  }, [status?.status, status?.progress]);
-
-  useEffect(() => {
-    if (status?.status !== "rendering") {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      if (!renderStartedAtRef.current) {
-        return;
-      }
+      setRenderElapsed(elapsedSeconds);
 
       const currentProgress = Math.max(
         50,
-        Math.min(
-          95,
-          Number(status.progress) || 50
-        )
+        Math.min(95, Number(status.progress) || 50)
       );
 
-      const elapsedSeconds =
-        (Date.now() -
-          renderStartedAtRef.current) /
-        1000;
+      const completedProgress = currentProgress - 50;
 
-      const completedProgress =
-        currentProgress - 50;
-
-      if (
-        completedProgress >= 1 &&
-        elapsedSeconds >= 2
-      ) {
+      if (completedProgress >= 1 && elapsedSeconds >= 2) {
         const estimatedTotalSeconds =
-          elapsedSeconds *
-          (45 / completedProgress);
+          elapsedSeconds * (45 / completedProgress);
 
         const remainingSeconds = Math.max(
           1,
-          Math.ceil(
-            estimatedTotalSeconds -
-              elapsedSeconds
-          )
+          Math.ceil(estimatedTotalSeconds - elapsedSeconds)
         );
 
-        if (
-          renderEtaRef.current !==
-          remainingSeconds
-        ) {
-          renderEtaRef.current =
-            remainingSeconds;
-          setRenderEta(
-            remainingSeconds
-          );
-        }
+        renderEtaRef.current = remainingSeconds;
+        setRenderEta(remainingSeconds);
+        setRenderTotal(estimatedTotalSeconds);
       }
-    }, 1000);
+    };
+
+    updateRenderTiming();
+
+    const timer = window.setInterval(
+      updateRenderTiming,
+      1000
+    );
 
     return () => window.clearInterval(timer);
   }, [status?.status, status?.progress]);
