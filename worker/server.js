@@ -1713,11 +1713,19 @@ async function runSmartRender(
       // Final edited clip
       // ------------------------------------------------------
 
+      // PHASE 5: throttle progress callbacks sent back to Vercel.
+      // FFmpeg can emit many progress events while the actual render work
+      // is unchanged. Reporting every integer percentage adds network/fetch
+      // overhead without improving the rendered video. Keep UI updates
+      // responsive while reducing unnecessary status requests.
       let lastRenderProgress =
         75 +
         Math.round(
           (i / total) * 25
         );
+      let lastReportedRenderProgress =
+        lastRenderProgress;
+      let lastRenderReportAt = 0;
 
       await buildEditedClip(
         rawOutPath,
@@ -1753,13 +1761,35 @@ async function runSmartRender(
             lastRenderProgress =
               renderProgress;
 
-            void reportStatus({
-              status: "rendering",
-              progress: renderProgress,
-              message:
-                `Rendering clip ${clipNum} of ${total}`,
-              clips,
-            });
+            const now = Date.now();
+            const progressDelta =
+              renderProgress -
+              lastReportedRenderProgress;
+            const enoughProgress =
+              progressDelta >= 2;
+            const enoughTime =
+              now - lastRenderReportAt >= 800;
+            const clipFinished =
+              renderProgress >= Math.floor(clipEndProgress);
+
+            if (
+              enoughProgress ||
+              enoughTime ||
+              clipFinished
+            ) {
+              lastReportedRenderProgress =
+                renderProgress;
+              lastRenderReportAt =
+                now;
+
+              void reportStatus({
+                status: "rendering",
+                progress: renderProgress,
+                message:
+                  `Rendering clip ${clipNum} of ${total}`,
+                clips,
+              });
+            }
           }
         },
         normalizedClipInfo
