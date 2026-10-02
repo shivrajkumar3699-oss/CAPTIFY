@@ -486,10 +486,11 @@ async function buildEditedClip(
       ? `${outputPath}.prepared.mp4`
       : null;
 
-  const backgroundPath =
-    is4KOrLarger && mode === "fill"
-      ? `${outputPath}.background.mp4`
-      : null;
+  // For 4K fill renders, the blurred background is now generated directly
+  // from the already-downscaled prepared source in the final filter graph.
+  // This removes one complete encode + decode cycle while keeping the
+  // memory-heavy 4K frames out of the graph.
+  const backgroundPath = null;
 
   const cleanupTemp = () => {
     for (const filePath of [
@@ -598,97 +599,9 @@ async function buildEditedClip(
       });
     }
 
-    if (backgroundPath) {
-      await new Promise((resolve, reject) => {
-        const backgroundWidth =
-          Math.max(
-            180,
-            Math.floor(targetWidth / 3 / 2) * 2
-          );
+    // 4K blurred background is intentionally generated in the final
+    // low-resolution filter graph below. No separate background encode.
 
-        const backgroundHeight =
-          Math.max(
-            320,
-            Math.floor(targetHeight / 3 / 2) * 2
-          );
-
-        const backgroundCommand =
-          ffmpeg(preparedPath)
-            .videoFilters(
-              `scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
-              `crop=${backgroundWidth}:${backgroundHeight},` +
-              "gblur=sigma=18:steps=1"
-            )
-            .videoCodec("libx264")
-            .outputOptions([
-              "-an",
-              "-threads", "1",
-              "-filter_threads", "1",
-              "-preset", "ultrafast",
-              "-tune", "zerolatency",
-              "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
-              "-crf", "32",
-              "-pix_fmt", "yuv420p",
-              "-movflags", "+faststart",
-              "-avoid_negative_ts", "make_zero",
-            ]);
-
-        backgroundCommand
-          .on("start", (commandLine) => {
-            console.log(
-              "[buildEditedClip] 4K blurred background preparation:"
-            );
-            console.log(commandLine);
-          })
-          .on("stderr", (line) => {
-            if (
-              line.includes("Error") ||
-              line.includes("error") ||
-              line.includes("Invalid") ||
-              line.includes("failed") ||
-              line.includes("Killed")
-            ) {
-              console.error(
-                `[buildEditedClip] background: ${line}`
-              );
-            }
-          })
-          .on("error", (err, stdout, stderr) => {
-            console.error(
-              "[buildEditedClip] background preparation ERROR:",
-              err?.message || err
-            );
-
-            if (stderr) {
-              console.error(
-                "[buildEditedClip] background preparation STDERR:"
-              );
-              console.error(stderr);
-            }
-
-            reject(err);
-          })
-          .on("end", () => {
-            if (
-              !fs.existsSync(backgroundPath) ||
-              fs.statSync(backgroundPath).size <= 0
-            ) {
-              return reject(
-                new Error(
-                  "Blurred background preparation finished but file was not created"
-                )
-              );
-            }
-
-            console.log(
-              `[buildEditedClip] Prepared blurred background: ${backgroundPath} (${fs.statSync(backgroundPath).size} bytes)`
-            );
-
-            resolve();
-          })
-          .save(backgroundPath);
-      });
-    }
 
     const renderInput =
       preparedPath || rawClipPath;
@@ -844,12 +757,7 @@ async function buildEditedClip(
      *
      * The audio graph therefore needs the correct BGM input index.
      */
-    if (bgmPath && backgroundPath) {
-      for (let i = 0; i < filters.length; i++) {
-        filters[i] = filters[i]
-          .replace("[1:a]", "[2:a]");
-      }
-    }
+    // No separate background input is used anymore. BGM remains input 1.
 
     const maps = bgmPath
       ? [
