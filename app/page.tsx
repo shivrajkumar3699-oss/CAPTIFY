@@ -556,7 +556,7 @@ export default function Home() {
     status?.status === "rendering" &&
     typeof status.message === "string"
       ? status.message.match(
-          /^(?:Rendering clip\\s+(\\d+)\\s+of\\s+(\\d+)|Clip\\s+(\\d+)\\s+of\\s+(\\d+)\\s+completed)$/i
+          /^(?:Rendering clip\s+(\\d+)\s+of\s+(\\d+)|Clip\s+(\\d+)\s+of\s+(\\d+)\s+completed)$/i
         )
       : null;
 
