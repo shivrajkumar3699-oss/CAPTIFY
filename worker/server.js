@@ -622,10 +622,10 @@ async function handleChunkUpload({
   );
 
   try {
-    if (
-      offset === 0 &&
-      !fs.existsSync(filePath)
-    ) {
+    // A new upload/restart always begins at byte 0.
+    // Recreate the preallocated file even if a partial/stale file
+    // from an interrupted attempt is still present.
+    if (offset === 0) {
       const fd =
         fs.openSync(
           filePath,
@@ -643,9 +643,14 @@ async function handleChunkUpload({
     } else if (
       !fs.existsSync(filePath)
     ) {
+      // The worker may have restarted between chunks because Render's
+      // free instance uses ephemeral /tmp storage. Tell the browser to
+      // restart this upload from chunk 0 instead of failing the whole job.
       return res.status(409).json({
         error:
-          "Upload must start with the first chunk.",
+          "Upload state was lost. Restarting from the first chunk is required.",
+        code: "UPLOAD_RESTART_REQUIRED",
+        restartFrom: 0,
       });
     }
 
