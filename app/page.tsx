@@ -626,6 +626,8 @@ export default function Home() {
         !isPreparingHook &&
         Number.isFinite(clipNumber) &&
         Number.isFinite(clipTotal) &&
+        clipNumber !== null &&
+        clipTotal !== null &&
         clipNumber > 0 &&
         clipTotal > 0
       ) {
