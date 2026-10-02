@@ -16,6 +16,8 @@ const {
 
 const {
   buildEditedClip,
+  getVideoInfo,
+  normalizeClipForRender,
 } = require("./lib/pipeline");
 
 const {
@@ -1601,10 +1603,25 @@ async function runSmartRender(
       // NO original 3 GB video is used here.
       // ------------------------------------------------------
 
-      fs.copyFileSync(
+      const uploadedClipInfo =
+        await getVideoInfo(uploadedClipPath);
+
+      const normalizedRawPath =
+        rawOutPath + ".normalized.mp4";
+
+      await normalizeClipForRender(
         uploadedClipPath,
+        normalizedRawPath,
+        uploadedClipInfo
+      );
+
+      fs.renameSync(
+        normalizedRawPath,
         rawOutPath
       );
+
+      const normalizedClipInfo =
+        await getVideoInfo(rawOutPath);
 
       // ------------------------------------------------------
       // Captions
@@ -1615,17 +1632,14 @@ async function runSmartRender(
       // above the visible source video instead of below it.
       // ------------------------------------------------------
 
-      const uploadedClipInfo =
-        await getVideoInfo(uploadedClipPath);
-
       buildAssCaptions(
         captionWords,
         startTime,
         endTime,
         captionColor,
         assPath,
-        uploadedClipInfo.width,
-        uploadedClipInfo.height
+        normalizedClipInfo.width,
+        normalizedClipInfo.height
       );
 
       // ------------------------------------------------------
