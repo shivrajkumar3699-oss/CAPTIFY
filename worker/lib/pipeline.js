@@ -939,6 +939,8 @@ async function buildEditedClip(
 
 module.exports = {
   getVideoDuration,
+  getVideoInfo,
+  normalizeClipForRender,
   cutRawClip,
   buildEditedClip,
   buildFilterGraph,
