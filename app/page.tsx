@@ -592,7 +592,7 @@ export default function Home() {
 
           if (
             resolution &&
-            Math.max(resolution.width, resolution.height) > 1920
+            Math.max(resolution.width, resolution.height) > 2560
           ) {
             const label = formatResolution(
               resolution.width,
@@ -605,7 +605,7 @@ export default function Home() {
                 resolution.width +
                 "×" +
                 resolution.height +
-                ") is not supported. Please use a 1080p resolution video (1920×1080 or lower)."
+                ") is not supported. Please use a 1440p resolution video (2560×1440 or lower)."
             );
             setFile(null);
 
