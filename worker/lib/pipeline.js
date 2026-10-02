@@ -484,132 +484,22 @@ async function buildEditedClip(
    *   worker because a true 4K final render cannot reliably fit in the
    *   worker's ~512 MB memory ceiling.
    */
-  const preparedPath =
-    is4KOrLarger
-      ? `${outputPath}.prepared.mp4`
-      : null;
-
-  // For 4K fill renders, the blurred background is now generated directly
-  // from the already-downscaled prepared source in the final filter graph.
-  // This removes one complete encode + decode cycle while keeping the
-  // memory-heavy 4K frames out of the graph.
+  // PHASE 7: render anamorphic/rotated clips in ONE FFmpeg pass.
+  // The previous implementation encoded a normalized intermediate first,
+  // then encoded captions/BGM again. Geometry correction now happens in
+  // the final filter graph, eliminating that extra full encode.
+  const preparedPath = null;
   const backgroundPath = null;
 
-  const cleanupTemp = () => {
-    for (const filePath of [
-      preparedPath,
-      backgroundPath,
-    ]) {
-      if (!filePath) continue;
-
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.rmSync(filePath, {
-            force: true,
-          });
-        }
-      } catch (error) {
-        console.warn(
-          "[buildEditedClip] temp cleanup failed:",
-          error?.message || error
-        );
-      }
-    }
-  };
-
-  try {
-    if (preparedPath) {
-      await new Promise((resolve, reject) => {
-        const prepareCommand =
-          ffmpeg(rawClipPath)
-            .videoFilters(
-              `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`
-            )
-            .videoCodec("libx264")
-            .audioCodec("aac")
-            .outputOptions([
-              "-map", "0:v:0?",
-              "-map", "0:a:0?",
-              "-threads", "1",
-              "-filter_threads", "1",
-              "-filter_complex_threads", "1",
-              "-preset", "ultrafast",
-              "-tune", "zerolatency",
-              "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
-              "-crf", "28",
-              "-pix_fmt", "yuv420p",
-              "-b:a", "128k",
-              "-shortest",
-              "-movflags", "+faststart",
-              "-avoid_negative_ts", "make_zero",
-            ]);
-
-        prepareCommand
-          .on("start", (commandLine) => {
-            console.log(
-              "[buildEditedClip] 4K low-memory preparation:"
-            );
-            console.log(commandLine);
-            onProgress?.(0);
-          })
-          .on("stderr", (line) => {
-            if (
-              line.includes("Error") ||
-              line.includes("error") ||
-              line.includes("Invalid") ||
-              line.includes("failed") ||
-              line.includes("Killed")
-            ) {
-              console.error(
-                `[buildEditedClip] prepare: ${line}`
-              );
-            }
-          })
-          .on("error", (err, stdout, stderr) => {
-            console.error(
-              "[buildEditedClip] 4K preparation ERROR:",
-              err?.message || err
-            );
-
-            if (stderr) {
-              console.error(
-                "[buildEditedClip] 4K preparation STDERR:"
-              );
-              console.error(stderr);
-            }
-
-            reject(err);
-          })
-          .on("end", () => {
-            if (
-              !fs.existsSync(preparedPath) ||
-              fs.statSync(preparedPath).size <= 0
-            ) {
-              return reject(
-                new Error(
-                  "4K preparation finished but prepared clip was not created"
-                )
-              );
-            }
-
-            console.log(
-              `[buildEditedClip] Prepared low-memory source: ${preparedPath} (${fs.statSync(preparedPath).size} bytes)`
-            );
-
-            resolve();
-          })
-          .save(preparedPath);
-      });
-    }
-
-    // 4K blurred background is intentionally generated in the final
-    // low-resolution filter graph below. No separate background encode.
-
+  const cleanupTemp = () => {};
 
     const renderInput =
       preparedPath || rawClipPath;
 
     const filters = [];
+    const rotationFilter = originalInfo.applyRotation
+      ? (Number(originalInfo.rotation) < 0 ? "transpose=2," : "transpose=1,")
+      : "";
 
     if (mode === "fill") {
       if (isAlreadyTargetPortrait) {
@@ -657,14 +547,14 @@ async function buildEditedClip(
           );
 
         filters.push(
-          `[bgsrc]scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
+          `[bgsrc]${rotationFilter}scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
           `crop=${backgroundWidth}:${backgroundHeight},` +
           "gblur=sigma=18:steps=1," +
           `scale=${targetWidth}:${targetHeight}[bg]`
         );
 
         filters.push(
-          `[fgsrc]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,format=yuv420p[fg]`
+          `[fgsrc]${rotationFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[fg]`
         );
 
         filters.push(
@@ -685,7 +575,7 @@ async function buildEditedClip(
         );
       } else {
         const videoChain =
-          `setsar=1,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
+          `${rotationFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
           `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
 
         filters.push(
@@ -743,7 +633,8 @@ async function buildEditedClip(
 
     return await new Promise((resolve, reject) => {
       const command =
-        ffmpeg(renderInput);
+        ffmpeg(renderInput)
+          .inputOptions(["-noautorotate"]);
 
     if (bgmPath) {
       command.input(bgmPath);
