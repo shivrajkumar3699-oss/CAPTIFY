@@ -436,6 +436,16 @@ async function buildEditedClip(
       ? "720x1280"
       : "1080x1920";
 
+  // SAFE FAST PATH:
+  // If the clip is already exactly the final 9:16 render size, do not
+  // scale, split, blur, crop, or overlay it again. The visible result is
+  // identical because the foreground already fills the complete canvas.
+  const isAlreadyTargetPortrait =
+    originalInfo.sampleAspectRatio === "1:1" &&
+    !originalInfo.applyRotation &&
+    originalInfo.width === targetWidth &&
+    originalInfo.height === targetHeight;
+
   console.log(
     `[buildEditedClip] source=${originalInfo.width}x${originalInfo.height} ` +
       `target=${targetLabel} ` +
@@ -686,7 +696,16 @@ async function buildEditedClip(
     const filters = [];
 
     if (mode === "fill") {
-      if (backgroundPath) {
+      if (isAlreadyTargetPortrait) {
+        // A full-frame 9:16 clip completely covers its own blurred
+        // background. Skipping that hidden work does not change pixels.
+        filters.push(
+          "[0:v]," +
+          "fade=t=in:st=0:d=0.4," +
+          "ass='" + bt + expr + bt + ":shaping=complex," +
+          "format=yuv420p[v]"
+        );
+      } else if (backgroundPath) {
         const foreground =
           `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`;
 
@@ -740,7 +759,16 @@ async function buildEditedClip(
         );
       }
     } else {
-      const videoChain =
+      if (isAlreadyTargetPortrait) {
+        // Already the exact target canvas: skip redundant scale/pad work.
+        filters.push(
+          "[0:v]," +
+          "fade=t=in:st=0:d=0.4," +
+          "ass='" + bt + expr + bt + ":shaping=complex," +
+          "format=yuv420p[v]"
+        );
+      } else {
+        const videoChain =
         `setsar=1,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
         `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
 
