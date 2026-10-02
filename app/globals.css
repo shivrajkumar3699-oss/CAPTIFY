@@ -11,13 +11,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-/* CAPTIFY brand text-selection highlight */
-::selection {
-  background: #F7D002;
-  color: #030303;
-}
 
-::-moz-selection {
-  background: #F7D002;
-  color: #030303;
-}
+
+/* CAPTIFY brand text-selection highlight */
+::selection { background: #F7D002 !important; color: #030303 !important; }
+::-moz-selection { background: #F7D002 !important; color: #030303 !important; }
