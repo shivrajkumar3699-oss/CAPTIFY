@@ -159,10 +159,10 @@ function formatResolution(width: number, height: number) {
 
 function validateFile(file: File) {
   const extension = getExtension(file.name);
-  const allowed = ["mp3", "wav", "mp4", "mkv"];
+  const allowed = ["mp3", "wav", "mp4", "mkv", "mov"];
 
   if (!allowed.includes(extension)) {
-    return "Please upload an MP3, WAV, MP4, or MKV file.";
+    return "Please upload an MP3, WAV, MP4, MKV, or MOV file.";
   }
 
   if (file.size > MAX_FILE_SIZE) {
@@ -549,9 +549,9 @@ export default function Home() {
   const progress = displayProgress;
 
   const renderStartedAtRef = useRef(0);
-  const renderEtaRef = useRef<number | null>(null);
-  const renderEtaLastUpdatedAtRef = useRef(0);
-  const renderTotalRef = useRef<number | null>(null);
+  const renderClipStartedAtRef = useRef(0);
+  const renderLastClipNumberRef = useRef<number | null>(null);
+  const renderCompletedClipTimesRef = useRef<number[]>([]);
   const [renderEta, setRenderEta] = useState<number | null>(null);
   const [renderElapsed, setRenderElapsed] = useState(0);
   const [renderTotal, setRenderTotal] = useState<number | null>(null);
@@ -590,9 +590,9 @@ export default function Home() {
   useEffect(() => {
     if (status?.status !== "rendering") {
       renderStartedAtRef.current = 0;
-      renderEtaRef.current = null;
-      renderEtaLastUpdatedAtRef.current = 0;
-      renderTotalRef.current = null;
+      renderClipStartedAtRef.current = 0;
+      renderLastClipNumberRef.current = null;
+      renderCompletedClipTimesRef.current = [];
       setRenderEta(null);
       setRenderElapsed(0);
       setRenderTotal(null);
@@ -614,64 +614,94 @@ export default function Home() {
 
       setRenderElapsed(elapsedSeconds);
 
-      const currentProgress = Math.max(
-        50,
-        Math.min(95, Number(status.progress) || 50)
-      );
+      // ETA is based on real clip timing, not the percentage bar.
+      // The old percentage-based calculation could drain to "01 sec"
+      // while FFmpeg was still rendering the first clip.
+      const clipNumber = renderClipNumber;
+      const clipTotal = renderClipTotal;
 
-      const completedProgress = currentProgress - 50;
-
-      if (completedProgress >= 1 && elapsedSeconds >= 2) {
-        const freshTotal =
-          elapsedSeconds * (45 / completedProgress);
-
-        if (renderTotalRef.current === null) {
-          renderTotalRef.current = freshTotal;
-        } else {
-          // Never let a new progress sample make the remaining time jump up.
-          renderTotalRef.current = Math.min(
-            renderTotalRef.current,
-            freshTotal
-          );
+      if (
+        !isPreparingHook &&
+        Number.isFinite(clipNumber) &&
+        Number.isFinite(clipTotal) &&
+        clipNumber > 0 &&
+        clipTotal > 0
+      ) {
+        if (
+          renderLastClipNumberRef.current !== clipNumber ||
+          renderClipStartedAtRef.current <= 0
+        ) {
+          renderLastClipNumberRef.current = clipNumber;
+          renderClipStartedAtRef.current = now;
         }
 
-        const totalSeconds = Math.max(
-          elapsedSeconds + 1,
-          renderTotalRef.current
+        const currentClipElapsed = Math.max(
+          0,
+          (now - renderClipStartedAtRef.current) / 1000
         );
 
-        const previousEta =
-          renderEtaRef.current;
+        const completedTimes =
+          renderCompletedClipTimesRef.current;
 
-        const previousUpdatedAt =
-          renderEtaLastUpdatedAtRef.current;
+        // When a "completed" message arrives, capture that clip's real
+        // render duration once. The next clip then uses the measured
+        // average instead of pretending the percentage is linear.
+        if (
+          typeof status.message === "string" &&
+          /^Clip\s+\d+\s+of\s+\d+\s+completed$/i.test(
+            status.message.trim()
+          ) &&
+          renderLastClipNumberRef.current === clipNumber &&
+          currentClipElapsed > 0
+        ) {
+          const lastMeasured =
+            completedTimes[completedTimes.length - 1];
 
-        const elapsedSinceLastEta =
-          previousUpdatedAt > 0
-            ? (now - previousUpdatedAt) / 1000
-            : 0;
+          if (
+            lastMeasured === undefined ||
+            Math.abs(lastMeasured - currentClipElapsed) > 0.5
+          ) {
+            completedTimes.push(currentClipElapsed);
+          }
+        }
 
-        const calculatedEta = Math.max(
-          1,
-          Math.ceil(totalSeconds - elapsedSeconds)
+        const averageClipTime =
+          completedTimes.length > 0
+            ? completedTimes.reduce(
+                (sum, value) => sum + value,
+                0
+              ) / completedTimes.length
+            : currentClipElapsed;
+
+        // Never show a tiny ETA merely because progress moved a few
+        // percentage points. At minimum, account for the current clip
+        // plus every clip still waiting after it.
+        const currentClipEstimate = Math.max(
+          currentClipElapsed,
+          averageClipTime
         );
 
-        // ETA is monotonic: it can decrease, but never jump from 3m to 7m.
-        const nextEta =
-          previousEta === null
-            ? calculatedEta
-            : Math.max(
-                1,
-                Math.min(
-                  previousEta - Math.max(0, elapsedSinceLastEta),
-                  calculatedEta
-                )
-              );
+        const clipsAfterCurrent = Math.max(
+          0,
+          clipTotal - clipNumber
+        );
 
-        renderEtaRef.current = Math.ceil(nextEta);
-        renderEtaLastUpdatedAtRef.current = now;
-        setRenderEta(Math.ceil(nextEta));
-        setRenderTotal(totalSeconds);
+        const remainingSeconds =
+          currentClipEstimate +
+          clipsAfterCurrent * averageClipTime;
+
+        const safeRemaining = Math.max(
+          2,
+          Math.ceil(remainingSeconds)
+        );
+
+        setRenderEta(safeRemaining);
+        setRenderTotal(
+          elapsedSeconds + safeRemaining
+        );
+      } else {
+        setRenderEta(null);
+        setRenderTotal(null);
       }
     };
 
@@ -683,7 +713,14 @@ export default function Home() {
     );
 
     return () => window.clearInterval(timer);
-  }, [status?.status, status?.progress]);
+  }, [
+    status?.status,
+    status?.progress,
+    status?.message,
+    renderClipNumber,
+    renderClipTotal,
+    isPreparingHook,
+  ]);
 
   const pollingCancelRef = useRef<(() => void) | null>(null);
   const highestProgressRef = useRef(0);
@@ -939,7 +976,7 @@ export default function Home() {
 
       const extension = getExtension(selectedFile.name);
 
-      if (extension === "mp4" || extension === "mkv") {
+      if (extension === "mp4" || extension === "mkv" || extension === "mov") {
         try {
           const resolution = await getVideoResolution(selectedFile);
 
@@ -981,7 +1018,7 @@ export default function Home() {
         } catch (resolutionError) {
           console.error("Resolution check failed:", resolutionError);
           setError(
-            "Could not read this video's resolution. Please use an MP4 or MKV video at 1080p resolution or lower."
+            "Could not read this video's resolution. Please use an MP4, MKV, or MOV video at 1080p resolution or lower."
           );
           setFile(null);
 
@@ -2168,7 +2205,7 @@ ${timeRange(
                     </h2>
 
                     <p className="mt-1.5 text-sm text-white/35">
-                    MP3, WAV, MP4 or MKV - maximum 3 GB
+                    MP3, WAV, MP4, MKV or MOV - maximum 3 GB
                     </p>
                   </div>
 
@@ -2249,7 +2286,7 @@ ${timeRange(
                     <input
                       ref={inputRef}
                       type="file"
-                      accept=".mp3,.wav,.mp4,.mkv,audio/mpeg,audio/wav,video/mp4,video/x-matroska"
+                      accept=".mp3,.wav,.mp4,.mkv,.mov,audio/mpeg,audio/wav,video/mp4,video/x-matroska,video/quicktime"
                       className="hidden"
                       onChange={handleFileChange}
                     />
