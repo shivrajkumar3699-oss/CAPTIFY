@@ -222,10 +222,11 @@ export async function trimVideoForUpload(
 
       browserVideoCodec =
         await getFirstEncodableVideoCodec(
-          output.format.getSupportedVideoCodecs(),
+          ["avc"],
           {
             width: 1080,
             height: resizedHeight,
+            bitrate: 5_000_000,
           },
         );
 
@@ -249,9 +250,11 @@ export async function trimVideoForUpload(
             // Keep the complete 4K hook while reducing its encoded size
             // before it reaches the Render worker.
             width: 1080,
+            height: resizedHeight!,
             fit: "contain",
             codec: browserVideoCodec!,
-            hardwareAcceleration: "no-preference",
+            bitrate: 5_000_000,
+            hardwareAcceleration: "prefer-software",
           }
         : undefined,
 
