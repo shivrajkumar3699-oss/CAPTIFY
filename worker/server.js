@@ -1646,10 +1646,30 @@ async function runSmartRender(
           `[${jobId}] smart clip ${clipNum}: FAST PATH — skipping normalization (display=${displayWidth.toFixed(0)}x${displayHeight.toFixed(0)}, SAR=1:1)`
         );
 
-        fs.copyFileSync(
-          uploadedClipPath,
-          rawOutPath
-        );
+        // PHASE 6: zero-copy the already-normalized clip when possible.
+        // Both paths live on the same Render filesystem, so a hard link
+        // avoids reading and writing the entire MP4 again. If hard links
+        // are unavailable for any reason, safely fall back to a normal copy.
+        try {
+          fs.linkSync(
+            uploadedClipPath,
+            rawOutPath
+          );
+
+          console.log(
+            `[${jobId}] smart clip ${clipNum}: PHASE 6 — reused clip via hard link (zero-copy)`
+          );
+        } catch (linkError) {
+          console.warn(
+            `[${jobId}] smart clip ${clipNum}: hard link unavailable, falling back to copy:`,
+            linkError?.message || linkError
+          );
+
+          fs.copyFileSync(
+            uploadedClipPath,
+            rawOutPath
+          );
+        }
 
         normalizedClipInfo =
           uploadedClipInfo;
