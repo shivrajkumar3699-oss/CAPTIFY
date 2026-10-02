@@ -17,7 +17,6 @@ const {
 const {
   buildEditedClip,
   getVideoInfo,
-  normalizeClipForRender,
 } = require("./lib/pipeline");
 
 const {
@@ -1639,62 +1638,24 @@ async function runSmartRender(
         displayRatio >= 0.555 &&
         displayRatio <= 0.57;
 
-      let normalizedClipInfo;
+      // PHASE 7: do not encode a normalized intermediate.
+      // The final FFmpeg render now fixes SAR/rotation/framing/captions in one pass.
+      // Keep rawUrl behavior by linking the uploaded browser clip when possible.
+      console.log(
+        `[${jobId}] smart clip ${clipNum}: PHASE 7 — one-pass render (no normalization encode)`
+      );
 
-      if (isNormalNineBySixteen) {
-        console.log(
-          `[${jobId}] smart clip ${clipNum}: FAST PATH — skipping normalization (display=${displayWidth.toFixed(0)}x${displayHeight.toFixed(0)}, SAR=1:1)`
+      try {
+        fs.linkSync(uploadedClipPath, rawOutPath);
+      } catch (linkError) {
+        console.warn(
+          `[${jobId}] smart clip ${clipNum}: hard link unavailable, falling back to copy:`,
+          linkError?.message || linkError
         );
-
-        // PHASE 6: zero-copy the already-normalized clip when possible.
-        // Both paths live on the same Render filesystem, so a hard link
-        // avoids reading and writing the entire MP4 again. If hard links
-        // are unavailable for any reason, safely fall back to a normal copy.
-        try {
-          fs.linkSync(
-            uploadedClipPath,
-            rawOutPath
-          );
-
-          console.log(
-            `[${jobId}] smart clip ${clipNum}: PHASE 6 — reused clip via hard link (zero-copy)`
-          );
-        } catch (linkError) {
-          console.warn(
-            `[${jobId}] smart clip ${clipNum}: hard link unavailable, falling back to copy:`,
-            linkError?.message || linkError
-          );
-
-          fs.copyFileSync(
-            uploadedClipPath,
-            rawOutPath
-          );
-        }
-
-        normalizedClipInfo =
-          uploadedClipInfo;
-      } else {
-        console.log(
-          `[${jobId}] smart clip ${clipNum}: normalization required (display=${displayWidth.toFixed(2)}x${displayHeight.toFixed(2)}, SAR=${uploadedClipInfo.sampleAspectRatio}, rotation=${uploadedClipInfo.rotation})`
-        );
-
-        const normalizedRawPath =
-          rawOutPath + ".normalized.mp4";
-
-        await normalizeClipForRender(
-          uploadedClipPath,
-          normalizedRawPath,
-          uploadedClipInfo
-        );
-
-        fs.renameSync(
-          normalizedRawPath,
-          rawOutPath
-        );
-
-        normalizedClipInfo =
-          await getVideoInfo(rawOutPath);
+        fs.copyFileSync(uploadedClipPath, rawOutPath);
       }
+
+      const normalizedClipInfo = uploadedClipInfo;
 
       // ------------------------------------------------------
       // Captions
@@ -1711,8 +1672,8 @@ async function runSmartRender(
         endTime,
         captionColor,
         assPath,
-        normalizedClipInfo.width,
-        normalizedClipInfo.height
+        1080,
+        1920
       );
 
       // ------------------------------------------------------
