@@ -2745,11 +2745,36 @@ ${timeRange(
                             Rendering
                           </span>
                         </div>
-                        <p className="mt-1.5 text-[11px] text-white/30">
-                          {renderEta
-                            ? `Estimated time remaining: ${formatTime(renderEta)}`
-                            : "Calculating remaining time..."}
-                        </p>
+                        <div className="mt-3 grid grid-cols-3 gap-2">
+                          <div className="rounded-xl border border-white/[0.05] bg-white/[0.025] px-2.5 py-2">
+                            <p className="text-[8px] font-black uppercase tracking-[0.1em] text-white/20">
+                              Remaining
+                            </p>
+                            <p className="mt-1 text-[11px] font-bold text-white/65">
+                              {renderEta
+                                ? formatTime(renderEta)
+                                : "--:--"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-white/[0.05] bg-white/[0.025] px-2.5 py-2">
+                            <p className="text-[8px] font-black uppercase tracking-[0.1em] text-white/20">
+                              Elapsed
+                            </p>
+                            <p className="mt-1 text-[11px] font-bold text-white/65">
+                              {formatTime(renderElapsed)}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-white/[0.05] bg-white/[0.025] px-2.5 py-2">
+                            <p className="text-[8px] font-black uppercase tracking-[0.1em] text-white/20">
+                              Est. total
+                            </p>
+                            <p className="mt-1 text-[11px] font-bold text-white/65">
+                              {renderTotal
+                                ? formatTime(renderTotal)
+                                : "--:--"}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     )}
 
