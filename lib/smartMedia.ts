@@ -9,9 +9,6 @@ import {
   Mp3OutputFormat,
   Mp4OutputFormat,
   Output,
-  getFirstEncodableAudioCodec,
-  getFirstEncodableVideoCodec,
-  QUALITY_MEDIUM,
 } from "mediabunny";
 import { registerMp3Encoder } from "@mediabunny/mp3-encoder";
 
@@ -311,9 +308,13 @@ async function trim4KWithNativeRecorder(
       throw new Error("Browser could not create the 4K video canvas.");
     }
 
+    const captureStream = (video as HTMLVideoElement & {
+      captureStream?: () => MediaStream;
+    }).captureStream;
+
     const sourceStream =
-      typeof video.captureStream === "function"
-        ? video.captureStream()
+      typeof captureStream === "function"
+        ? captureStream.call(video)
         : null;
 
     if (!sourceStream) {
