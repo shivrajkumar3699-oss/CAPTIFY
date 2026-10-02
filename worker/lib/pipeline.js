@@ -702,7 +702,7 @@ async function buildEditedClip(
         filters.push(
           "[0:v]," +
           "fade=t=in:st=0:d=0.4," +
-          "ass='" + bt + expr + bt + ":shaping=complex," +
+          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
           "format=yuv420p[v]"
         );
       } else if (backgroundPath) {
@@ -764,7 +764,7 @@ async function buildEditedClip(
         filters.push(
           "[0:v]," +
           "fade=t=in:st=0:d=0.4," +
-          "ass='" + bt + expr + bt + ":shaping=complex," +
+          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
           "format=yuv420p[v]"
         );
       } else {
