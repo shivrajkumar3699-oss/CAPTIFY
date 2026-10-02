@@ -767,9 +767,7 @@ async function buildEditedClip(
 
     if (canUseSimpleVideoFilter) {
       const simpleVideoFilter =
-        filters[0]
-          .replace(/^\\[0:v\\]/, "")
-          .replace(/\\[v\\]$/, "");
+        filters[0].slice(5, -3);
 
       command
         .videoFilters(simpleVideoFilter)
@@ -799,6 +797,8 @@ async function buildEditedClip(
         ])
         .outputOptions(maps);
     }
+
+      command
       .videoCodec("libx264")
       .audioCodec("aac")
       .outputOptions([
