@@ -42,7 +42,7 @@ type JobStatus = {
 const MAX_FILE_SIZE = 3 * 1024 * 1024 * 1024;
 
 const CAPTION_COLORS = [
-  { name: "Yellow", value: "#FFE600" },
+  { name: "Yellow", value: "#F7D002" },
   { name: "White", value: "#FFFFFF" },
   { name: "Green", value: "#39FF14" },
   { name: "Pink", value: "#FF3EA5" },
@@ -364,6 +364,29 @@ function Icon({
   }
 }
 
+async function downloadClip(url: string, filename: string) {
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error("Download failed (" + response.status + ")");
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("video/mp4")) {
+      throw new Error("The generated clip was not returned as an MP4 video.");
+    }
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = filename.endsWith(".mp4") ? filename : filename + ".mp4";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    console.error("CAPTIFY clip download failed:", error);
+    alert(error instanceof Error ? error.message : "Unable to download the generated clip.");
+  }
+}
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState("");
@@ -371,7 +394,7 @@ export default function Home() {
 
   const [videoLanguage, setVideoLanguage] = useState("auto");
   const [captionLanguage, setCaptionLanguage] = useState("same");
-  const [captionColor, setCaptionColor] = useState("#FFE600");
+  const [captionColor, setCaptionColor] = useState("#F7D002");
 
   // ONLY 1-7 CLIPS.
   // Default = 6.
@@ -2534,19 +2557,22 @@ ${timeRange(
                         )}
 
                         <div className="mt-4 grid grid-cols-2 gap-2">
-                          <a
-                            href={
-                              clip.editedUrl
-                            }
-                            download
-                            className="flex items-center justify-center gap-2 rounded-xl bg-[#F7D002] px-3 py-3 text-xs font-black uppercase tracking-[0.08em] text-black transition hover:brightness-105"
-                          >
-                            <Icon
-                              name="download"
-                              size={14}
-                            />
-                            Download
-                          </a>
+                          <button
+                             type="button"
+                             onClick={() =>
+                               downloadClip(
+                                 clip.editedUrl,
+                                 "captify-clip-" + (clip.index + 1) + ".mp4"
+                               )
+                             }
+                             className="flex items-center justify-center gap-2 rounded-xl bg-[#F7D002] px-3 py-3 text-xs font-black uppercase tracking-[0.08em] text-black transition hover:brightness-105"
+                           >
+                             <Icon
+                               name="download"
+                               size={14}
+                             />
+                             Download
+                           </button>
 
                           <button
                             type="button"
@@ -2579,19 +2605,22 @@ ${timeRange(
                         </div>
 
                         {clip.rawUrl && (
-                          <a
-                            href={
-                              clip.rawUrl
-                            }
-                            download
-                            className="mt-3 flex items-center justify-center gap-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/20 transition hover:text-white/50"
-                          >
-                            Download raw clip
-                            <Icon
-                              name="arrow"
-                              size={12}
-                            />
-                          </a>
+                          <button
+                             type="button"
+                             onClick={() =>
+                               downloadClip(
+                                 clip.rawUrl,
+                                 "captify-clip-" + (clip.index + 1) + "-raw.mp4"
+                               )
+                             }
+                             className="mt-3 flex items-center justify-center gap-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/20 transition hover:text-white/50"
+                           >
+                             Download raw clip
+                             <Icon
+                               name="arrow"
+                               size={12}
+                             />
+                           </button>
                         )}
                       </div>
                     </article>
