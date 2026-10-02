@@ -411,15 +411,18 @@ async function buildEditedClip(
   bgmPath,
   outputPath,
   framing,
-  onProgress
+  onProgress,
+  sourceInfo
 ) {
   const mode =
     framing === "fill"
       ? "fill"
       : "fit";
 
+  // PHASE 4: reuse the video metadata already probed by server.js.
+  // This removes one ffprobe process per clip without changing rendering.
   const originalInfo =
-    await getVideoInfo(rawClipPath);
+    sourceInfo || await getVideoInfo(rawClipPath);
 
   const is4KOrLarger =
     originalInfo.width >= 3840 ||
