@@ -16,3 +16,20 @@ body {
 /* CAPTIFY brand text-selection highlight */
 ::selection { background: #F7D002 !important; color: #030303 !important; }
 ::-moz-selection { background: #F7D002 !important; color: #030303 !important; }
+
+
+/* Keep the generated 9:16 preview uncropped when native fullscreen is opened. */
+.captify-preview-video {
+  object-fit: contain !important;
+  background: #000;
+}
+
+.captify-preview-video:fullscreen,
+.captify-preview-video:-webkit-full-screen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  object-fit: contain !important;
+  background: #000;
+}
