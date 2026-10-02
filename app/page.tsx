@@ -670,23 +670,14 @@ export default function Home() {
           return;
         }
 
-        const finalClipMessage =
-          data.status === "rendering" &&
-          typeof data.message === "string" &&
-          /^Clip\\s+\\d+\\s+of\\s+\\d+\\s+completed$/i.test(
-            data.message.trim()
-          );
-
         const renderFinished =
-          data.status === "rendering" &&
+          data.status === "done" &&
           Array.isArray(data.clips) &&
-          data.clips.length > 0 &&
-          (Number(data.progress) >= 100 || finalClipMessage);
+          data.clips.length > 0;
 
         if (
           data.status === "done" ||
-          data.status === "error" ||
-          renderFinished
+          data.status === "error"
         ) {
           terminalStatusRef.current = true;
           highestProgressRef.current =
@@ -706,25 +697,30 @@ export default function Home() {
 
           stopPolling();
 
+          setStatus(terminalData);
+
           if (
             terminalData.status === "done" &&
-            Array.isArray(
-              terminalData.clips
-            ) &&
+            Array.isArray(terminalData.clips) &&
             terminalData.clips.length > 0
           ) {
-            const cachedClips =
-              await cacheGeneratedClips(
-                terminalData.clips
-              );
+            void cacheGeneratedClips(terminalData.clips).then(
+              (cachedClips) => {
+                setStatus((current) => {
+                  if (
+                    !current ||
+                    current.status !== "done" ||
+                    current.jobId !== terminalData.jobId
+                  ) {
+                    return current;
+                  }
 
-            setStatus({
-              ...terminalData,
-              clips: cachedClips,
-            });
-          } else {
-            setStatus(
-              terminalData
+                  return {
+                    ...current,
+                    clips: cachedClips,
+                  };
+                });
+              }
             );
           }
 
