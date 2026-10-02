@@ -670,11 +670,18 @@ export default function Home() {
           return;
         }
 
+        const finalClipMessage =
+          data.status === "rendering" &&
+          typeof data.message === "string" &&
+          /^Clip\\s+\\d+\\s+of\\s+\\d+\\s+completed$/i.test(
+            data.message.trim()
+          );
+
         const renderFinished =
           data.status === "rendering" &&
-          Number(data.progress) >= 100 &&
           Array.isArray(data.clips) &&
-          data.clips.length > 0;
+          data.clips.length > 0 &&
+          (Number(data.progress) >= 100 || finalClipMessage);
 
         if (
           data.status === "done" ||
