@@ -552,6 +552,7 @@ export default function Home() {
   const renderClipStartedAtRef = useRef(0);
   const renderLastClipNumberRef = useRef<number | null>(null);
   const renderCompletedClipTimesRef = useRef<number[]>([]);
+  const renderLastCompletedClipRef = useRef<number | null>(null);
   const [renderEta, setRenderEta] = useState<number | null>(null);
   const [renderElapsed, setRenderElapsed] = useState(0);
   const [renderTotal, setRenderTotal] = useState<number | null>(null);
@@ -593,6 +594,7 @@ export default function Home() {
       renderClipStartedAtRef.current = 0;
       renderLastClipNumberRef.current = null;
       renderCompletedClipTimesRef.current = [];
+      renderLastCompletedClipRef.current = null;
       setRenderEta(null);
       setRenderElapsed(0);
       setRenderTotal(null);
@@ -652,17 +654,11 @@ export default function Home() {
             status.message.trim()
           ) &&
           renderLastClipNumberRef.current === clipNumber &&
+          renderLastCompletedClipRef.current !== clipNumber &&
           currentClipElapsed > 0
         ) {
-          const lastMeasured =
-            completedTimes[completedTimes.length - 1];
-
-          if (
-            lastMeasured === undefined ||
-            Math.abs(lastMeasured - currentClipElapsed) > 0.5
-          ) {
-            completedTimes.push(currentClipElapsed);
-          }
+          completedTimes.push(currentClipElapsed);
+          renderLastCompletedClipRef.current = clipNumber;
         }
 
         const averageClipTime =
