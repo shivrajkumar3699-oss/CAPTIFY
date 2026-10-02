@@ -1907,6 +1907,16 @@ ${timeRange(
                   </div>
                 )}
 
+                {error && (
+                  <div className="relative mt-4 overflow-hidden rounded-2xl border border-red-400/30 bg-red-400/[0.06] px-4 py-3.5 text-sm text-red-200 shadow-[0_0_28px_rgba(248,113,113,.16)]">
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_50%,rgba(248,113,113,.12),transparent_48%)]" />
+                    <div className="relative flex items-start gap-3">
+                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-[0_0_12px_rgba(248,113,113,.9)]" />
+                      <span className="leading-6">{error}</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Primary controls */}
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   <GlassSelect
@@ -2230,15 +2240,7 @@ ${timeRange(
                   </button>
                 )}
 
-                {error && (
-                  <div className="relative mt-4 overflow-hidden rounded-2xl border border-red-400/30 bg-red-400/[0.06] px-4 py-3.5 text-sm text-red-200 shadow-[0_0_28px_rgba(248,113,113,.16)]">
-                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_50%,rgba(248,113,113,.12),transparent_48%)]" />
-                    <div className="relative flex items-start gap-3">
-                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-[0_0_12px_rgba(248,113,113,.9)]" />
-                      <span className="leading-6">{error}</span>
-                    </div>
-                  </div>
-                )}
+
               </div>
             </div>
 
