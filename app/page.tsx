@@ -22,6 +22,7 @@ type ClipResult = {
   endTime: number;
   rawUrl: string;
   editedUrl: string;
+  previewUrl?: string;
 };
 
 type JobStatus = {
@@ -367,23 +368,58 @@ function Icon({
 async function downloadClip(url: string, filename: string) {
   try {
     const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) throw new Error("Download failed (" + response.status + ")");
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.toLowerCase().includes("video/mp4")) {
-      throw new Error("The generated clip was not returned as an MP4 video.");
+
+    if (!response.ok) {
+      throw new Error(
+        "Download failed (" + response.status + ")"
+      );
     }
+
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    if (
+      !contentType
+        .toLowerCase()
+        .includes("video/mp4")
+    ) {
+      throw new Error(
+        "The generated clip was not returned as an MP4 video."
+      );
+    }
+
     const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
+    const blobUrl =
+      URL.createObjectURL(blob);
+
+    const anchor =
+      document.createElement("a");
+
     anchor.href = blobUrl;
-    anchor.download = filename.endsWith(".mp4") ? filename : filename + ".mp4";
+    anchor.download =
+      filename.endsWith(".mp4")
+        ? filename
+        : filename + ".mp4";
+
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    URL.revokeObjectURL(blobUrl);
+
+    window.setTimeout(
+      () => URL.revokeObjectURL(blobUrl),
+      1000
+    );
   } catch (error) {
-    console.error("CAPTIFY clip download failed:", error);
-    alert(error instanceof Error ? error.message : "Unable to download the generated clip.");
+    console.error(
+      "CAPTIFY clip download failed:",
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : "Unable to download the generated clip."
+    );
   }
 }
 
@@ -527,6 +563,91 @@ export default function Home() {
     return () => stopPolling();
   }, [stopPolling]);
 
+  const cacheGeneratedClips = useCallback(
+    async (clips: ClipResult[]) => {
+      const cached = await Promise.all(
+        clips.map(async (clip) => {
+          if (!clip.editedUrl) {
+            return clip;
+          }
+
+          // Keep the generated MP4 in the browser while this session is open.
+          // Render Free uses ephemeral /tmp storage, so a worker restart can
+          // otherwise make an already-finished clip return HTTP 404.
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const response = await fetch(
+                clip.editedUrl,
+                { cache: "no-store" }
+              );
+
+              if (
+                !response.ok ||
+                !response.body
+              ) {
+                throw new Error(
+                  "Clip fetch returned HTTP " +
+                    response.status
+                );
+              }
+
+              const contentType =
+                response.headers.get(
+                  "content-type"
+                ) || "";
+
+              if (
+                !contentType
+                  .toLowerCase()
+                  .includes("video/mp4")
+              ) {
+                throw new Error(
+                  "Generated clip was not returned as MP4."
+                );
+              }
+
+              const blob =
+                await response.blob();
+
+              if (blob.size <= 0) {
+                throw new Error(
+                  "Generated clip is empty."
+                );
+              }
+
+              return {
+                ...clip,
+                previewUrl:
+                  URL.createObjectURL(blob),
+              };
+            } catch (error) {
+              if (attempt === 2) {
+                console.warn(
+                  "Could not cache generated clip:",
+                  clip.index + 1,
+                  error
+                );
+              } else {
+                await new Promise(
+                  (resolve) =>
+                    setTimeout(
+                      resolve,
+                      800 * (attempt + 1)
+                    )
+                );
+              }
+            }
+          }
+
+          return clip;
+        })
+      );
+
+      return cached;
+    },
+    []
+  );
+
   const fetchStatus = useCallback(
     async (id: string) => {
       try {
@@ -564,18 +685,42 @@ export default function Home() {
           highestProgressRef.current =
             data.status === "error" ? highestProgressRef.current : 100;
 
-          setStatus(
+          const terminalData: JobStatus =
             renderFinished
               ? {
                   ...data,
                   status: "done",
                   progress: 100,
-                  message: data.message || "Clips ready",
+                  message:
+                    data.message ||
+                    "Clips ready",
                 }
-              : data
-          );
+              : data;
 
           stopPolling();
+
+          if (
+            terminalData.status === "done" &&
+            Array.isArray(
+              terminalData.clips
+            ) &&
+            terminalData.clips.length > 0
+          ) {
+            const cachedClips =
+              await cacheGeneratedClips(
+                terminalData.clips
+              );
+
+            setStatus({
+              ...terminalData,
+              clips: cachedClips,
+            });
+          } else {
+            setStatus(
+              terminalData
+            );
+          }
+
           return;
         }
 
@@ -598,7 +743,10 @@ export default function Home() {
         console.error(err);
       }
     },
-    [stopPolling]
+    [
+      cacheGeneratedClips,
+      stopPolling,
+    ]
   );
 
   const startPolling = useCallback(
@@ -2578,6 +2726,7 @@ ${timeRange(
                       <div className="relative aspect-[9/16] overflow-hidden bg-black">
                         <video
                           src={
+                            clip.previewUrl ||
                             clip.editedUrl
                           }
                           controls
@@ -2653,6 +2802,7 @@ ${timeRange(
                              type="button"
                              onClick={() =>
                                downloadClip(
+                                 clip.previewUrl ||
                                  clip.editedUrl,
                                  "captify-clip-" + (clip.index + 1) + ".mp4"
                                )
