@@ -789,8 +789,9 @@ async function buildEditedClip(
       }
     }
 
-    const command =
-      ffmpeg(renderInput);
+    return await new Promise((resolve, reject) => {
+      const command =
+        ffmpeg(renderInput);
 
     if (backgroundPath) {
       command.input(backgroundPath);
@@ -923,6 +924,7 @@ async function buildEditedClip(
         reject(err);
       })
       .save(outputPath);
+    });
   } catch (error) {
     cleanupTemp();
     throw error;
