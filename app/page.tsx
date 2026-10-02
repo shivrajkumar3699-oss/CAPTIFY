@@ -1801,7 +1801,7 @@ ${timeRange(
 
                     <div className="relative">
                       <h3 className="text-xl font-bold">
-                        Drop your video or audio here
+                        Drop your video here
                       </h3>
 
                       <p className="mt-2 text-sm text-white/35">
@@ -2231,10 +2231,10 @@ ${timeRange(
                 )}
 
                 {error && (
-                  <div className="relative mt-4 overflow-hidden rounded-2xl border border-[#F7D002]/30 bg-[#F7D002]/[0.06] px-4 py-3.5 text-sm text-[#FFE66B] shadow-[0_0_28px_rgba(247,208,2,.16)]">
-                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_50%,rgba(247,208,2,.12),transparent_48%)]" />
+                  <div className="relative mt-4 overflow-hidden rounded-2xl border border-red-400/30 bg-red-400/[0.06] px-4 py-3.5 text-sm text-red-200 shadow-[0_0_28px_rgba(248,113,113,.16)]">
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_50%,rgba(248,113,113,.12),transparent_48%)]" />
                     <div className="relative flex items-start gap-3">
-                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#F7D002] shadow-[0_0_12px_#F7D002]" />
+                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-[0_0_12px_rgba(248,113,113,.9)]" />
                       <span className="leading-6">{error}</span>
                     </div>
                   </div>
