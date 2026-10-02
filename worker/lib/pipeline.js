@@ -432,11 +432,11 @@ async function buildEditedClip(
       : "1080x1920";
 
   console.log(
-    \`[buildEditedClip] source=\${originalInfo.width}x\${originalInfo.height} \` +
-      \`target=\${targetLabel} \` +
-      \`framing=\${mode} \` +
-      \`bgm=\${bgmPath ? "yes" : "no"} \` +
-      \`duration=\${Number(clipDuration).toFixed(1)}s\`
+    `[buildEditedClip] source=${originalInfo.width}x${originalInfo.height} ` +
+      `target=${targetLabel} ` +
+      `framing=${mode} ` +
+      `bgm=${bgmPath ? "yes" : "no"} ` +
+      `duration=${Number(clipDuration).toFixed(1)}s`
   );
 
   console.log(
@@ -468,12 +468,12 @@ async function buildEditedClip(
    */
   const preparedPath =
     is4KOrLarger
-      ? \`\${outputPath}.prepared.mp4\`
+      ? `${outputPath}.prepared.mp4`
       : null;
 
   const backgroundPath =
     is4KOrLarger && mode === "fill"
-      ? \`\${outputPath}.background.mp4\`
+      ? `${outputPath}.background.mp4`
       : null;
 
   const cleanupTemp = () => {
@@ -504,7 +504,7 @@ async function buildEditedClip(
         const prepareCommand =
           ffmpeg(rawClipPath)
             .videoFilters(
-              \`scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease\`
+              `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`
             )
             .videoCodec("libx264")
             .audioCodec("aac")
@@ -542,7 +542,7 @@ async function buildEditedClip(
               line.includes("Killed")
             ) {
               console.error(
-                \`[buildEditedClip] prepare: \${line}\`
+                `[buildEditedClip] prepare: ${line}`
               );
             }
           })
@@ -574,7 +574,7 @@ async function buildEditedClip(
             }
 
             console.log(
-              \`[buildEditedClip] Prepared low-memory source: \${preparedPath} (\${fs.statSync(preparedPath).size} bytes)\`
+              `[buildEditedClip] Prepared low-memory source: ${preparedPath} (${fs.statSync(preparedPath).size} bytes)`
             );
 
             resolve();
@@ -600,8 +600,8 @@ async function buildEditedClip(
         const backgroundCommand =
           ffmpeg(preparedPath)
             .videoFilters(
-              \`scale=\${backgroundWidth}:\${backgroundHeight}:force_original_aspect_ratio=increase,\` +
-              \`crop=\${backgroundWidth}:\${backgroundHeight},\` +
+              `scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
+              `crop=${backgroundWidth}:${backgroundHeight},` +
               "gblur=sigma=18:steps=1"
             )
             .videoCodec("libx264")
@@ -634,7 +634,7 @@ async function buildEditedClip(
               line.includes("Killed")
             ) {
               console.error(
-                \`[buildEditedClip] background: \${line}\`
+                `[buildEditedClip] background: ${line}`
               );
             }
           })
@@ -666,7 +666,7 @@ async function buildEditedClip(
             }
 
             console.log(
-              \`[buildEditedClip] Prepared blurred background: \${backgroundPath} (\${fs.statSync(backgroundPath).size} bytes)\`
+              `[buildEditedClip] Prepared blurred background: ${backgroundPath} (${fs.statSync(backgroundPath).size} bytes)`
             );
 
             resolve();
@@ -683,25 +683,25 @@ async function buildEditedClip(
     if (mode === "fill") {
       if (backgroundPath) {
         const foreground =
-          \`scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease\`;
+          `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`;
 
         filters.push(
-          \`[1:v]scale=\${targetWidth}:\${targetHeight}[bg]\`
+          `[1:v]scale=${targetWidth}:${targetHeight}[bg]`
         );
 
         filters.push(
-          \`[0:v]\${foreground},format=yuv420p[fg]\`
+          `[0:v]${foreground},format=yuv420p[fg]`
         );
 
         filters.push(
           "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
           "fade=t=in:st=0:d=0.4," +
-          \`ass='\${escapePathForFilter(assPath)}':shaping=complex,\` +
+          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
           "format=yuv420p[v]"
         );
       } else {
         filters.push(
-          \`[0:v]split=2[bgsrc][fgsrc]\`
+          `[0:v]split=2[bgsrc][fgsrc]`
         );
 
         const backgroundWidth =
@@ -717,32 +717,32 @@ async function buildEditedClip(
           );
 
         filters.push(
-          \`[bgsrc]scale=\${backgroundWidth}:\${backgroundHeight}:force_original_aspect_ratio=increase,\` +
-          \`crop=\${backgroundWidth}:\${backgroundHeight},\` +
+          `[bgsrc]scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
+          `crop=${backgroundWidth}:${backgroundHeight},` +
           "gblur=sigma=18:steps=1," +
-          \`scale=\${targetWidth}:\${targetHeight}[bg]\`
+          `scale=${targetWidth}:${targetHeight}[bg]`
         );
 
         filters.push(
-          \`[fgsrc]scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease,format=yuv420p[fg]\`
+          `[fgsrc]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,format=yuv420p[fg]`
         );
 
         filters.push(
           "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
           "fade=t=in:st=0:d=0.4," +
-          \`ass='\${escapePathForFilter(assPath)}':shaping=complex,\` +
+          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
           "format=yuv420p[v]"
         );
       }
     } else {
       const videoChain =
-        \`scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease,\` +
-        \`pad=\${targetWidth}:\${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black\`;
+        `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
+        `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black`;
 
       filters.push(
-        \`[0:v]\${videoChain},\` +
+        `[0:v]${videoChain},` +
         "fade=t=in:st=0:d=0.4," +
-        \`ass='\${escapePathForFilter(assPath)}':shaping=complex,\` +
+        `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
         "format=yuv420p[v]"
       );
     }
@@ -756,9 +756,9 @@ async function buildEditedClip(
 
       const bgmBase =
         "[1:a]" +
-        \`volume=\${BGM_VOLUME},\` +
+        `volume=${BGM_VOLUME},` +
         "afade=t=in:st=0:d=1," +
-        \`afade=t=out:st=\${fadeOutStart}:d=1.5\`;
+        `afade=t=out:st=${fadeOutStart}:d=1.5`;
 
       if (originalInfo.hasAudio) {
         filters.push(
@@ -766,13 +766,13 @@ async function buildEditedClip(
         );
 
         filters.push(
-          \`\${bgmBase}[bgm0]\`
+          `${bgmBase}[bgm0]`
         );
 
         filters.push(
-          \`[bgm0][sc]sidechaincompress=\` +
-          \`threshold=\${DUCK_THRESHOLD}:\` +
-          \`ratio=\${DUCK_RATIO}:\` +
+          `[bgm0][sc]sidechaincompress=` +
+          `threshold=${DUCK_THRESHOLD}:` +
+          `ratio=${DUCK_RATIO}:` +
           "attack=30:" +
           "release=500[bgmd]"
         );
@@ -786,7 +786,7 @@ async function buildEditedClip(
         );
       } else {
         filters.push(
-          \`\${bgmBase},atrim=duration=\${Number(clipDuration).toFixed(2)}[a]\`
+          `${bgmBase},atrim=duration=${Number(clipDuration).toFixed(2)}[a]`
         );
       }
     }
@@ -880,7 +880,7 @@ async function buildEditedClip(
           line.includes("Killed")
         ) {
           console.error(
-            \`[buildEditedClip] \${line}\`
+            `[buildEditedClip] ${line}`
           );
         }
       })
@@ -902,7 +902,7 @@ async function buildEditedClip(
           fs.statSync(outputPath).size;
 
         console.log(
-          \`[buildEditedClip] Created: \${outputPath} (\${size} bytes)\`
+          `[buildEditedClip] Created: ${outputPath} (${size} bytes)`
         );
 
         cleanupTemp();
