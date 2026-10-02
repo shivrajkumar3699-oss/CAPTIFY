@@ -1606,22 +1606,75 @@ async function runSmartRender(
       const uploadedClipInfo =
         await getVideoInfo(uploadedClipPath);
 
-      const normalizedRawPath =
-        rawOutPath + ".normalized.mp4";
+      // FAST PATH:
+      // A normal square-pixel 9:16 browser clip is already render-ready.
+      // Do not encode it a second time just to normalize metadata.
+      // This removes one full FFmpeg encode from the common path.
+      const sarParts = String(
+        uploadedClipInfo.sampleAspectRatio || "1:1"
+      ).split(":");
 
-      await normalizeClipForRender(
-        uploadedClipPath,
-        normalizedRawPath,
-        uploadedClipInfo
-      );
+      const sarNum =
+        Number(sarParts[0]) || 1;
 
-      fs.renameSync(
-        normalizedRawPath,
-        rawOutPath
-      );
+      const sarDen =
+        Number(sarParts[1]) || 1;
 
-      const normalizedClipInfo =
-        await getVideoInfo(rawOutPath);
+      const displayWidth =
+        uploadedClipInfo.codedWidth *
+        (sarNum / sarDen);
+
+      const displayHeight =
+        uploadedClipInfo.codedHeight;
+
+      const displayRatio =
+        displayHeight > 0
+          ? displayWidth / displayHeight
+          : 0;
+
+      const isNormalNineBySixteen =
+        uploadedClipInfo.sampleAspectRatio === "1:1" &&
+        !uploadedClipInfo.applyRotation &&
+        Number.isFinite(displayRatio) &&
+        displayRatio >= 0.555 &&
+        displayRatio <= 0.57;
+
+      let normalizedClipInfo;
+
+      if (isNormalNineBySixteen) {
+        console.log(
+          `[${jobId}] smart clip ${clipNum}: FAST PATH — skipping normalization (display=${displayWidth.toFixed(0)}x${displayHeight.toFixed(0)}, SAR=1:1)`
+        );
+
+        fs.copyFileSync(
+          uploadedClipPath,
+          rawOutPath
+        );
+
+        normalizedClipInfo =
+          uploadedClipInfo;
+      } else {
+        console.log(
+          `[${jobId}] smart clip ${clipNum}: normalization required (display=${displayWidth.toFixed(2)}x${displayHeight.toFixed(2)}, SAR=${uploadedClipInfo.sampleAspectRatio}, rotation=${uploadedClipInfo.rotation})`
+        );
+
+        const normalizedRawPath =
+          rawOutPath + ".normalized.mp4";
+
+        await normalizeClipForRender(
+          uploadedClipPath,
+          normalizedRawPath,
+          uploadedClipInfo
+        );
+
+        fs.renameSync(
+          normalizedRawPath,
+          rawOutPath
+        );
+
+        normalizedClipInfo =
+          await getVideoInfo(rawOutPath);
+      }
 
       // ------------------------------------------------------
       // Captions
