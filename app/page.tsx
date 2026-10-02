@@ -2734,7 +2734,7 @@ ${timeRange(
                           }
                           controls
                           preload="metadata"
-                          className="h-full w-full object-cover"
+                          className="h-full w-full object-contain captify-preview-video"
                         />
 
                         <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.15em] text-white/70 backdrop-blur-xl">
