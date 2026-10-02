@@ -415,10 +415,8 @@ async function buildEditedClip(
     await getVideoInfo(rawClipPath);
 
   const is4KOrLarger =
-    Math.max(
-      originalInfo.width,
-      originalInfo.height
-    ) >= 2160;
+    originalInfo.width >= 3840 ||
+    originalInfo.height >= 3840;
 
   const targetWidth =
     is4KOrLarger ? 720 : VIDEO_WIDTH;
