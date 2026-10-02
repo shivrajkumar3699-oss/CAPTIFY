@@ -97,6 +97,7 @@ function getVideoInfo(videoPath) {
         rotation, side_data_list: stream.side_data_list || [], tags: stream.tags || {},
         computedDisplayWidth: Number(displayWidth.toFixed(3)),
         computedDisplayHeight: Number(displayHeight.toFixed(3)),
+        displayGeometry: displayWidth >= displayHeight ? "landscape" : "portrait",
         applyRotation, finalWidth: width, finalHeight: height
       }, null, 2));
       resolve({ width, height, codedWidth, codedHeight, sampleAspectRatio: sarNum + ":" + sarDen, rotation, applyRotation, hasAudio });
@@ -114,11 +115,15 @@ async function normalizeClipForRender(sourcePath, outputPath, info) {
   const rotationFilter = shouldRotate ? (Number(info.rotation) < 0 ? "transpose=2," : "transpose=1,") : "";
   return new Promise((resolve, reject) => {
     ffmpeg(sourcePath)
-      .videoFilters(rotationFilter + "setsar=1,scale=1280:1280:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1")
+      .inputOptions(["-noautorotate"])
+      .videoFilters(
+        rotationFilter +
+        "scale=w='if(gt(iw*sar,ih),1280,trunc(iw*sar*1280/ih/2)*2)':h='if(gt(iw*sar,ih),trunc(ih*1280/(iw*sar)/2)*2,1280)',setsar=1"
+      )
       .videoCodec("libx264")
       .audioCodec("aac")
       .outputOptions([
-        "-noautorotate", "-map", "0:v:0?", "-map", "0:a:0?",
+        "-map", "0:v:0?", "-map", "0:a:0?",
         "-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1",
         "-preset", "ultrafast", "-tune", "zerolatency",
         "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
