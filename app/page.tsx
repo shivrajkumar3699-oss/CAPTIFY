@@ -579,6 +579,8 @@ export default function Home() {
       setUploadProgress(0);
       setUploadSpeed(0);
       setUploadEta(0);
+      targetProgressRef.current = 0;
+      setDisplayProgress(0);
       displayedUploadStatsRef.current = { speed: 0, eta: 0, lastUpdateAt: 0 };
       uploadStatsRef.current = { startedAt: 0, lastSampleAt: 0, lastSampleBytes: 0, samples: [] };
     },
@@ -615,6 +617,8 @@ export default function Home() {
     setUploadProgress(0);
     setUploadSpeed(0);
     setUploadEta(0);
+    targetProgressRef.current = 0;
+    setDisplayProgress(0);
 
     try {
       const newJobId = crypto.randomUUID();
