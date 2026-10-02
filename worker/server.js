@@ -1865,10 +1865,21 @@ app.get(
       });
     }
 
-    return res.download(
-      filePath,
-      filename
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${filename}"`
     );
+    res.setHeader(
+      "Cache-Control",
+      "private, no-store, max-age=0"
+    );
+    res.setHeader(
+      "Accept-Ranges",
+      "bytes"
+    );
+
+    return res.sendFile(filePath);
   }
 );
 
