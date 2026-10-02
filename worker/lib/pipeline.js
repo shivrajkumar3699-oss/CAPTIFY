@@ -682,15 +682,16 @@ async function buildEditedClip(
         );
       } else {
         const videoChain =
-        `setsar=1,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
-        `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+          `setsar=1,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
+          `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
 
-      filters.push(
-        `[0:v]${videoChain},` +
-        "fade=t=in:st=0:d=0.4," +
-        `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
-        "format=yuv420p[v]"
-      );
+        filters.push(
+          `[0:v]${videoChain},` +
+          "fade=t=in:st=0:d=0.4," +
+          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
+          "format=yuv420p[v]"
+        );
+      }
     }
 
     if (bgmPath) {
@@ -740,10 +741,6 @@ async function buildEditedClip(
     return await new Promise((resolve, reject) => {
       const command =
         ffmpeg(renderInput);
-
-    if (backgroundPath) {
-      command.input(backgroundPath);
-    }
 
     if (bgmPath) {
       command.input(bgmPath);
