@@ -55,7 +55,7 @@ function containsDevanagari(text) {
   return /[\u0900-\u097F]/.test(String(text));
 }
 
-function buildAssHeader(fontName) {
+function buildAssHeader(fontName, marginV = 60) {
   const whiteColor = "&H00FFFFFF";
   const outlineColor = "&H00000000";
   return `[Script Info]
@@ -68,7 +68,7 @@ PlayResY: ${VIDEO_HEIGHT}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},90,${whiteColor},${whiteColor},${outlineColor},&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,60,60,300,1
+Style: Default,${fontName},90,${whiteColor},${whiteColor},${outlineColor},&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -164,7 +164,7 @@ for (const w of words) {
  * @param {string} outputPath - where to write the .ass file
  * @returns {string} outputPath
  */
-function buildAssCaptions(words, clipStartTime, clipEndTime, highlightColorHex, outputPath) {
+function buildAssCaptions(words, clipStartTime, clipEndTime, highlightColorHex, outputPath, sourceWidth = VIDEO_WIDTH, sourceHeight = VIDEO_HEIGHT) {
   const highlightTag = `&H${hexToBgrHex(highlightColorHex)}&`;
   const whiteTag = `&HFFFFFF&`;
 
