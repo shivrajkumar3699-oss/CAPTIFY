@@ -130,9 +130,18 @@ export async function setJobStatus(
         WHEN status = 'done' THEN 100
         ELSE GREATEST(progress, ${incomingProgress})
       END,
-      message = ${message},
-      error = ${error},
-      clips = COALESCE(${clips}::jsonb, clips),
+      message = CASE
+        WHEN status = 'done' THEN message
+        ELSE ${message}
+      END,
+      error = CASE
+        WHEN status = 'done' THEN error
+        ELSE ${error}
+      END,
+      clips = CASE
+        WHEN status = 'done' THEN clips
+        ELSE COALESCE(${clips}::jsonb, clips)
+      END,
       completed_at = CASE
         WHEN ${incomingStatus} = 'done'
           OR status = 'done'
