@@ -157,25 +157,37 @@ export async function trimVideoForUpload(
   }
 
   /*
-   * FINAL BROWSER-SAFE PATH:
+   * Smart hook upload path:
    *
-   * Do NOT transcode video in the browser.
+   * - Normal sources stay on the fast packet-copy path.
+   * - 4K+ sources are DOWN-SCALED IN THE BROWSER to 1080p before upload.
    *
-   * The previous implementation tried to configure WebCodecs/H.264 and
-   * repeatedly hit:
-   * "Unsupported configuration. Check isConfigSupported() prior to calling configure()."
+   * This is important because Render's free worker has only ~512 MB RAM.
+   * Uploading a copied 2160x3840 hook forces FFmpeg on Render to decode
+   * 4K frames and can kill the worker before caption rendering even starts.
    *
-   * Mediabunny supports direct packet-copy conversion when no video
-   * transcoding options are supplied. That means the browser only trims and
-   * repackages the existing encoded video instead of touching VideoEncoder.
-   *
-   * Render will do the actual 1080x1920 normalization, captions, BGM and
-   * final encoding. This is the reliable zero-cost path.
+   * The browser has the user's local RAM/CPU available, so doing this
+   * conversion here keeps the server-side render lightweight.
    */
 
   const input = createInput(file);
 
   try {
+    const videoTrack = await input.getPrimaryVideoTrack();
+
+    if (!videoTrack) {
+      throw new Error(
+        "Could not find a video track in the selected file.",
+      );
+    }
+
+    const sourceWidth = Number(videoTrack.displayWidth);
+    const sourceHeight = Number(videoTrack.displayHeight);
+    const is4KOrLarger =
+      Number.isFinite(sourceWidth) &&
+      Number.isFinite(sourceHeight) &&
+      Math.max(sourceWidth, sourceHeight) >= 2160;
+
     const output = new Output({
       format: new Mp4OutputFormat({
         fastStart: "in-memory",
@@ -191,9 +203,18 @@ export async function trimVideoForUpload(
         end: Math.max(start + 0.1, end),
       },
 
-      // CRITICAL: no video/audio codec, resize, bitrate, fps, or
-      // forceTranscode settings here. This keeps the browser on the
-      // encoded-packet copy path and completely bypasses WebCodecs encoders.
+      video: is4KOrLarger
+        ? {
+            // Preserve the original aspect ratio while making the uploaded
+            // hook small enough for Render's free memory limit.
+            width: 1080,
+            fit: "contain",
+            quality: "medium",
+          }
+        : undefined,
+
+      // Normal sources use packet copy. 4K sources necessarily transcode
+      // because the video dimensions are being reduced to 1080-wide.
       copy: {
         mode: "preferred",
         shiftTolerance: Infinity,
@@ -213,7 +234,9 @@ export async function trimVideoForUpload(
 
     if (!conversion.isValid) {
       throw new Error(
-        "This video cannot be trimmed in your browser. Please use an MP4/MOV-compatible source.",
+        is4KOrLarger
+          ? "This 4K video cannot be converted in your browser. Please try the same file in Chrome/Edge."
+          : "This video cannot be trimmed in your browser. Please use an MP4/MOV-compatible source.",
       );
     }
 
