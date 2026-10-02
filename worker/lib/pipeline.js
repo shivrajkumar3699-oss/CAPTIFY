@@ -65,79 +65,81 @@ function getVideoDuration(sourcePath) {
 function getVideoInfo(videoPath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(videoPath, (err, metadata) => {
-      if (err) {
-        return reject(
-          new Error(
-            `Could not read video information: ${err.message}`
-          )
-        );
-      }
-
-      const streams =
-        (metadata && metadata.streams) || [];
-
-      const stream = streams.find(
-        (s) => s.codec_type === "video"
-      );
-
-      if (
-        !stream ||
-        !stream.width ||
-        !stream.height
-      ) {
-        return reject(
-          new Error("Could not read video size")
-        );
-      }
-
-      const hasAudio = streams.some(
-        (s) => s.codec_type === "audio"
-      );
-
+      if (err) return reject(new Error("Could not read video information: " + err.message));
+      const streams = (metadata && metadata.streams) || [];
+      const stream = streams.find((s) => s.codec_type === "video");
+      if (!stream || !stream.width || !stream.height) return reject(new Error("Could not read video size"));
+      const hasAudio = streams.some((s) => s.codec_type === "audio");
       let rotation = 0;
-
-      if (
-        stream.tags &&
-        stream.tags.rotate
-      ) {
-        rotation =
-          parseInt(stream.tags.rotate, 10) || 0;
+      if (stream.tags && stream.tags.rotate != null) rotation = Number(stream.tags.rotate) || 0;
+      if (Array.isArray(stream.side_data_list)) {
+        for (const sd of stream.side_data_list) if (typeof sd.rotation === "number") rotation = sd.rotation;
       }
-
-      if (
-        Array.isArray(stream.side_data_list)
-      ) {
-        for (const sd of stream.side_data_list) {
-          if (
-            typeof sd.rotation === "number"
-          ) {
-            rotation = sd.rotation;
-          }
-        }
+      const codedWidth = Number(stream.width);
+      const codedHeight = Number(stream.height);
+      let sarNum = 1, sarDen = 1;
+      if (stream.sample_aspect_ratio) {
+        const match = String(stream.sample_aspect_ratio).match(/^(\\d+):(\\d+)$/);
+        if (match) { sarNum = Number(match[1]) || 1; sarDen = Number(match[2]) || 1; }
       }
-
-      const rotated =
-        Math.abs(rotation) % 180 === 90;
-
-      resolve({
-        width: rotated
-          ? stream.height
-          : stream.width,
-
-        height: rotated
-          ? stream.width
-          : stream.height,
-
-        hasAudio,
-      });
+      const displayWidth = codedWidth * sarNum / sarDen;
+      const displayHeight = codedHeight;
+      const displayIsPortrait = displayHeight > displayWidth;
+      const quarterTurn = Math.abs(rotation) % 180 === 90;
+      const applyRotation = quarterTurn && !displayIsPortrait;
+      const width = applyRotation ? codedHeight : codedWidth;
+      const height = applyRotation ? codedWidth : codedHeight;
+      console.log("[getVideoInfo] ffprobe video stream:");
+      console.log(JSON.stringify({
+        path: videoPath, codedWidth, codedHeight,
+        sample_aspect_ratio: stream.sample_aspect_ratio || "1:1",
+        display_aspect_ratio: stream.display_aspect_ratio || null,
+        rotation, side_data_list: stream.side_data_list || [], tags: stream.tags || {},
+        computedDisplayWidth: Number(displayWidth.toFixed(3)),
+        computedDisplayHeight: Number(displayHeight.toFixed(3)),
+        applyRotation, finalWidth: width, finalHeight: height
+      }, null, 2));
+      resolve({ width, height, codedWidth, codedHeight, sampleAspectRatio: sarNum + ":" + sarDen, rotation, applyRotation, hasAudio });
     });
   });
 }
-
 // ------------------------------------------------------------
 // Raw clip
 // ------------------------------------------------------------
 
+// Normalize browser-trimmed MP4s before rendering.
+// This deliberately removes broken SAR and stale rotation metadata.
+async function normalizeClipForRender(sourcePath, outputPath, info) {
+  const shouldRotate = Boolean(info && info.applyRotation);
+  const rotationFilter = shouldRotate ? (Number(info.rotation) < 0 ? "transpose=2," : "transpose=1,") : "";
+  return new Promise((resolve, reject) => {
+    ffmpeg(sourcePath)
+      .videoFilters(rotationFilter + "setsar=1,scale=1280:1280:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1")
+      .videoCodec("libx264")
+      .audioCodec("aac")
+      .outputOptions([
+        "-noautorotate", "-map", "0:v:0?", "-map", "0:a:0?",
+        "-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1",
+        "-preset", "ultrafast", "-tune", "zerolatency",
+        "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
+        "-crf", "26", "-pix_fmt", "yuv420p", "-b:a", "128k",
+        "-shortest", "-movflags", "+faststart", "-avoid_negative_ts", "make_zero"
+      ])
+      .on("start", (line) => { console.log("[normalizeClipForRender] FFmpeg command:"); console.log(line); })
+      .on("stderr", (line) => { if (/Error|error|Invalid|failed|Killed/.test(line)) console.error("[normalizeClipForRender] " + line); })
+      .on("error", (err, stdout, stderr) => {
+        console.error("[normalizeClipForRender] FFmpeg ERROR:", err && err.message ? err.message : err);
+        if (stderr) console.error(stderr);
+        reject(err);
+      })
+      .on("end", () => {
+        if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size <= 0) return reject(new Error("Clip normalization finished but normalized clip was not created"));
+        console.log("[normalizeClipForRender] Created: " + outputPath + " (" + fs.statSync(outputPath).size + " bytes)");
+        resolve(outputPath);
+      })
+      .save(outputPath);
+  });
+}
 async function cutRawClip(
   sourcePath,
   startTime,
@@ -305,7 +307,7 @@ function buildFilterGraph(
       Math.max(320, Math.floor(targetHeight / 3 / 2) * 2);
 
     const foreground =
-      `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`;
+      `setsar=1,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,setsar=1`;
 
     const background =
       `scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
@@ -734,8 +736,8 @@ async function buildEditedClip(
       }
     } else {
       const videoChain =
-        `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
-        `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black`;
+        `setsar=1,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
+        `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
 
       filters.push(
         `[0:v]${videoChain},` +
