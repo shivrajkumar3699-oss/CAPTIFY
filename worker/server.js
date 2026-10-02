@@ -1611,14 +1611,21 @@ async function runSmartRender(
       //
       // captionWords still contain ORIGINAL VIDEO timestamps.
       // buildAssCaptions shifts them relative to startTime.
+      // Pass the uploaded clip dimensions so captions sit just
+      // above the visible source video instead of below it.
       // ------------------------------------------------------
+
+      const uploadedClipInfo =
+        await getVideoInfo(uploadedClipPath);
 
       buildAssCaptions(
         captionWords,
         startTime,
         endTime,
         captionColor,
-        assPath
+        assPath,
+        uploadedClipInfo.width,
+        uploadedClipInfo.height
       );
 
       // ------------------------------------------------------
