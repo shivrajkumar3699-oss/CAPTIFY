@@ -38,6 +38,37 @@ export type SmartSegment = {
   endTime: number;
 };
 
+export async function getVideoResolution(file: File) {
+  const input = createInput(file);
+
+  try {
+    const videoTrack = await input.getPrimaryVideoTrack();
+
+    if (!videoTrack) {
+      return null;
+    }
+
+    const width = await videoTrack.getDisplayWidth();
+    const height = await videoTrack.getDisplayHeight();
+
+    if (
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 0 ||
+      height <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      width: Math.round(width),
+      height: Math.round(height),
+    };
+  } finally {
+    input.dispose();
+  }
+}
+
 export async function getMediaDuration(file: File) {
   const input = createInput(file);
 
