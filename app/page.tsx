@@ -548,6 +548,140 @@ export default function Home() {
 
   const progress = displayProgress;
 
+  const renderStartedAtRef = useRef(0);
+  const renderEtaRef = useRef<number | null>(null);
+  const [renderEta, setRenderEta] = useState<number | null>(null);
+
+  const renderStatusMatch =
+    status?.status === "rendering" &&
+    typeof status.message === "string"
+      ? status.message.match(
+          /^(?:Rendering clip\\s+(\\d+)\\s+of\\s+(\\d+)|Clip\\s+(\\d+)\\s+of\\s+(\\d+)\\s+completed)$/i
+        )
+      : null;
+
+  const renderClipNumber = renderStatusMatch
+    ? Number(
+        renderStatusMatch[1] ||
+          renderStatusMatch[3]
+      )
+    : null;
+
+  const renderClipTotal = renderStatusMatch
+    ? Number(
+        renderStatusMatch[2] ||
+          renderStatusMatch[4]
+      )
+    : null;
+
+  useEffect(() => {
+    if (status?.status !== "rendering") {
+      renderStartedAtRef.current = 0;
+      renderEtaRef.current = null;
+      setRenderEta(null);
+      return;
+    }
+
+    if (!renderStartedAtRef.current) {
+      renderStartedAtRef.current = Date.now();
+      return;
+    }
+
+    const currentProgress = Math.max(
+      50,
+      Math.min(
+        95,
+        Number(status.progress) || 50
+      )
+    );
+
+    const elapsedSeconds =
+      (Date.now() - renderStartedAtRef.current) /
+      1000;
+
+    const completedProgress =
+      currentProgress - 50;
+
+    if (
+      completedProgress >= 1 &&
+      elapsedSeconds >= 2
+    ) {
+      const estimatedTotalSeconds =
+        elapsedSeconds *
+        (45 / completedProgress);
+
+      const remainingSeconds = Math.max(
+        1,
+        Math.ceil(
+          estimatedTotalSeconds -
+            elapsedSeconds
+        )
+      );
+
+      renderEtaRef.current =
+        remainingSeconds;
+      setRenderEta(remainingSeconds);
+    }
+  }, [status?.status, status?.progress]);
+
+  useEffect(() => {
+    if (status?.status !== "rendering") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      if (!renderStartedAtRef.current) {
+        return;
+      }
+
+      const currentProgress = Math.max(
+        50,
+        Math.min(
+          95,
+          Number(status.progress) || 50
+        )
+      );
+
+      const elapsedSeconds =
+        (Date.now() -
+          renderStartedAtRef.current) /
+        1000;
+
+      const completedProgress =
+        currentProgress - 50;
+
+      if (
+        completedProgress >= 1 &&
+        elapsedSeconds >= 2
+      ) {
+        const estimatedTotalSeconds =
+          elapsedSeconds *
+          (45 / completedProgress);
+
+        const remainingSeconds = Math.max(
+          1,
+          Math.ceil(
+            estimatedTotalSeconds -
+              elapsedSeconds
+          )
+        );
+
+        if (
+          renderEtaRef.current !==
+          remainingSeconds
+        ) {
+          renderEtaRef.current =
+            remainingSeconds;
+          setRenderEta(
+            remainingSeconds
+          );
+        }
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [status?.status, status?.progress]);
+
   const pollingCancelRef = useRef<(() => void) | null>(null);
   const highestProgressRef = useRef(0);
   const terminalStatusRef = useRef(false);
@@ -2642,14 +2776,32 @@ ${timeRange(
 
                   <p className="mt-2 text-sm text-white/35">
                     {status?.status === "rendering" &&
-                    typeof status.message === "string" &&
-                    /^Rendering clip\\s+\\d+\\s+of\\s+\\d+$/i.test(
-                      status.message.trim()
-                    )
-                      ? status.message
+                    renderClipNumber &&
+                    renderClipTotal
+                      ? `Rendering clip ${renderClipNumber} of ${renderClipTotal}`
                       : status?.message ||
                         "Preparing your media..."}
                   </p>
+
+                  {status?.status === "rendering" &&
+                    renderClipNumber &&
+                    renderClipTotal && (
+                      <div className="mt-4 rounded-2xl border border-white/[0.07] bg-black/[0.18] px-4 py-3">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-xs font-bold text-white/65">
+                            Clip {renderClipNumber} of {renderClipTotal}
+                          </span>
+                          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-[#F7D002]">
+                            Rendering
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-[11px] text-white/30">
+                          {renderEta
+                            ? `Estimated time remaining: ${formatTime(renderEta)}`
+                            : "Calculating remaining time..."}
+                        </p>
+                      </div>
+                    )}
 
                   {(uploadSpeed > 0 || uploadEta > 0) && (
                   <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-white/[0.07] bg-black/[0.18] p-4">
