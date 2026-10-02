@@ -411,11 +411,20 @@ async function buildEditedClip(
       ? "fill"
       : "fit";
 
-  const info =
+  const originalInfo =
     await getVideoInfo(rawClipPath);
 
   const is4KOrLarger =
-    Math.max(info.width, info.height) >= 2160;
+    Math.max(
+      originalInfo.width,
+      originalInfo.height
+    ) >= 2160;
+
+  const targetWidth =
+    is4KOrLarger ? 720 : VIDEO_WIDTH;
+
+  const targetHeight =
+    is4KOrLarger ? 1280 : VIDEO_HEIGHT;
 
   const targetLabel =
     is4KOrLarger
@@ -423,11 +432,11 @@ async function buildEditedClip(
       : "1080x1920";
 
   console.log(
-    `[buildEditedClip] source=${info.width}x${info.height} ` +
-      `target=${targetLabel} ` +
-      `framing=${mode} ` +
-      `bgm=${bgmPath ? "yes" : "no"} ` +
-      `duration=${Number(clipDuration).toFixed(1)}s`
+    \`[buildEditedClip] source=\${originalInfo.width}x\${originalInfo.height} \` +
+      \`target=\${targetLabel} \` +
+      \`framing=\${mode} \` +
+      \`bgm=\${bgmPath ? "yes" : "no"} \` +
+      \`duration=\${Number(clipDuration).toFixed(1)}s\`
   );
 
   console.log(
@@ -435,86 +444,413 @@ async function buildEditedClip(
     assPath
   );
 
-  return new Promise((resolve, reject) => {
-    let filters;
+  /*
+   * Render free-tier protection:
+   *
+   * A 4K frame is very expensive in FFmpeg. The previous Fill Blurred
+   * graph used split=2 on the 4K input, which meant FFmpeg could hold
+   * multiple large frame buffers at once. Render's free instance has
+   * a hard ~512 MB memory limit, so the process could be killed while
+   * the UI was around 75%.
+   *
+   * For 4K-or-larger uploads we now do a separate LOW-MEMORY preparation
+   * pass first. The final caption/BGM pass only works with the small
+   * 720-wide source. This removes the 4K frame from the caption filter
+   * graph entirely and avoids split=2 on a 4K stream.
+   *
+   * IMPORTANT:
+   * - Aspect ratio is preserved.
+   * - Fill Blurred still shows the complete video in the foreground.
+   * - The blurred background is generated from the same prepared video.
+   * - The 4K source is intentionally rendered to 720x1280 on the free
+   *   worker because a true 4K final render cannot reliably fit in the
+   *   worker's ~512 MB memory ceiling.
+   */
+  const preparedPath =
+    is4KOrLarger
+      ? \`\${outputPath}.prepared.mp4\`
+      : null;
 
-    try {
-      filters = buildFilterGraph(
-        info,
-        mode,
-        escapePathForFilter(assPath),
-        !!bgmPath,
-        clipDuration
+  const backgroundPath =
+    is4KOrLarger && mode === "fill"
+      ? \`\${outputPath}.background.mp4\`
+      : null;
+
+  const cleanupTemp = () => {
+    for (const filePath of [
+      preparedPath,
+      backgroundPath,
+    ]) {
+      if (!filePath) continue;
+
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.rmSync(filePath, {
+            force: true,
+          });
+        }
+      } catch (error) {
+        console.warn(
+          "[buildEditedClip] temp cleanup failed:",
+          error?.message || error
+        );
+      }
+    }
+  };
+
+  try {
+    if (preparedPath) {
+      await new Promise((resolve, reject) => {
+        const prepareCommand =
+          ffmpeg(rawClipPath)
+            .videoFilters(
+              \`scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease\`
+            )
+            .videoCodec("libx264")
+            .audioCodec("aac")
+            .outputOptions([
+              "-map", "0:v:0?",
+              "-map", "0:a:0?",
+              "-threads", "1",
+              "-filter_threads", "1",
+              "-filter_complex_threads", "1",
+              "-preset", "ultrafast",
+              "-tune", "zerolatency",
+              "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
+              "-crf", "28",
+              "-pix_fmt", "yuv420p",
+              "-b:a", "128k",
+              "-shortest",
+              "-movflags", "+faststart",
+              "-avoid_negative_ts", "make_zero",
+            ]);
+
+        prepareCommand
+          .on("start", (commandLine) => {
+            console.log(
+              "[buildEditedClip] 4K low-memory preparation:"
+            );
+            console.log(commandLine);
+            onProgress?.(0);
+          })
+          .on("stderr", (line) => {
+            if (
+              line.includes("Error") ||
+              line.includes("error") ||
+              line.includes("Invalid") ||
+              line.includes("failed") ||
+              line.includes("Killed")
+            ) {
+              console.error(
+                \`[buildEditedClip] prepare: \${line}\`
+              );
+            }
+          })
+          .on("error", (err, stdout, stderr) => {
+            console.error(
+              "[buildEditedClip] 4K preparation ERROR:",
+              err?.message || err
+            );
+
+            if (stderr) {
+              console.error(
+                "[buildEditedClip] 4K preparation STDERR:"
+              );
+              console.error(stderr);
+            }
+
+            reject(err);
+          })
+          .on("end", () => {
+            if (
+              !fs.existsSync(preparedPath) ||
+              fs.statSync(preparedPath).size <= 0
+            ) {
+              return reject(
+                new Error(
+                  "4K preparation finished but prepared clip was not created"
+                )
+              );
+            }
+
+            console.log(
+              \`[buildEditedClip] Prepared low-memory source: \${preparedPath} (\${fs.statSync(preparedPath).size} bytes)\`
+            );
+
+            resolve();
+          })
+          .save(preparedPath);
+      });
+    }
+
+    if (backgroundPath) {
+      await new Promise((resolve, reject) => {
+        const backgroundWidth =
+          Math.max(
+            180,
+            Math.floor(targetWidth / 3 / 2) * 2
+          );
+
+        const backgroundHeight =
+          Math.max(
+            320,
+            Math.floor(targetHeight / 3 / 2) * 2
+          );
+
+        const backgroundCommand =
+          ffmpeg(preparedPath)
+            .videoFilters(
+              \`scale=\${backgroundWidth}:\${backgroundHeight}:force_original_aspect_ratio=increase,\` +
+              \`crop=\${backgroundWidth}:\${backgroundHeight},\` +
+              "gblur=sigma=18:steps=1"
+            )
+            .videoCodec("libx264")
+            .outputOptions([
+              "-an",
+              "-threads", "1",
+              "-filter_threads", "1",
+              "-preset", "ultrafast",
+              "-tune", "zerolatency",
+              "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
+              "-crf", "32",
+              "-pix_fmt", "yuv420p",
+              "-movflags", "+faststart",
+              "-avoid_negative_ts", "make_zero",
+            ]);
+
+        backgroundCommand
+          .on("start", (commandLine) => {
+            console.log(
+              "[buildEditedClip] 4K blurred background preparation:"
+            );
+            console.log(commandLine);
+          })
+          .on("stderr", (line) => {
+            if (
+              line.includes("Error") ||
+              line.includes("error") ||
+              line.includes("Invalid") ||
+              line.includes("failed") ||
+              line.includes("Killed")
+            ) {
+              console.error(
+                \`[buildEditedClip] background: \${line}\`
+              );
+            }
+          })
+          .on("error", (err, stdout, stderr) => {
+            console.error(
+              "[buildEditedClip] background preparation ERROR:",
+              err?.message || err
+            );
+
+            if (stderr) {
+              console.error(
+                "[buildEditedClip] background preparation STDERR:"
+              );
+              console.error(stderr);
+            }
+
+            reject(err);
+          })
+          .on("end", () => {
+            if (
+              !fs.existsSync(backgroundPath) ||
+              fs.statSync(backgroundPath).size <= 0
+            ) {
+              return reject(
+                new Error(
+                  "Blurred background preparation finished but file was not created"
+                )
+              );
+            }
+
+            console.log(
+              \`[buildEditedClip] Prepared blurred background: \${backgroundPath} (\${fs.statSync(backgroundPath).size} bytes)\`
+            );
+
+            resolve();
+          })
+          .save(backgroundPath);
+      });
+    }
+
+    const renderInput =
+      preparedPath || rawClipPath;
+
+    const filters = [];
+
+    if (mode === "fill") {
+      if (backgroundPath) {
+        const foreground =
+          \`scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease\`;
+
+        filters.push(
+          \`[1:v]scale=\${targetWidth}:\${targetHeight}[bg]\`
+        );
+
+        filters.push(
+          \`[0:v]\${foreground},format=yuv420p[fg]\`
+        );
+
+        filters.push(
+          "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
+          "fade=t=in:st=0:d=0.4," +
+          \`ass='\${escapePathForFilter(assPath)}':shaping=complex,\` +
+          "format=yuv420p[v]"
+        );
+      } else {
+        filters.push(
+          \`[0:v]split=2[bgsrc][fgsrc]\`
+        );
+
+        const backgroundWidth =
+          Math.max(
+            180,
+            Math.floor(targetWidth / 3 / 2) * 2
+          );
+
+        const backgroundHeight =
+          Math.max(
+            320,
+            Math.floor(targetHeight / 3 / 2) * 2
+          );
+
+        filters.push(
+          \`[bgsrc]scale=\${backgroundWidth}:\${backgroundHeight}:force_original_aspect_ratio=increase,\` +
+          \`crop=\${backgroundWidth}:\${backgroundHeight},\` +
+          "gblur=sigma=18:steps=1," +
+          \`scale=\${targetWidth}:\${targetHeight}[bg]\`
+        );
+
+        filters.push(
+          \`[fgsrc]scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease,format=yuv420p[fg]\`
+        );
+
+        filters.push(
+          "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
+          "fade=t=in:st=0:d=0.4," +
+          \`ass='\${escapePathForFilter(assPath)}':shaping=complex,\` +
+          "format=yuv420p[v]"
+        );
+      }
+    } else {
+      const videoChain =
+        \`scale=\${targetWidth}:\${targetHeight}:force_original_aspect_ratio=decrease,\` +
+        \`pad=\${targetWidth}:\${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black\`;
+
+      filters.push(
+        \`[0:v]\${videoChain},\` +
+        "fade=t=in:st=0:d=0.4," +
+        \`ass='\${escapePathForFilter(assPath)}':shaping=complex,\` +
+        "format=yuv420p[v]"
       );
-    } catch (error) {
-      return reject(error);
+    }
+
+    if (bgmPath) {
+      const fadeOutStart =
+        Math.max(
+          0,
+          Number(clipDuration) - 1.5
+        ).toFixed(2);
+
+      const bgmBase =
+        "[1:a]" +
+        \`volume=\${BGM_VOLUME},\` +
+        "afade=t=in:st=0:d=1," +
+        \`afade=t=out:st=\${fadeOutStart}:d=1.5\`;
+
+      if (originalInfo.hasAudio) {
+        filters.push(
+          "[0:a]asplit=2[voice][sc]"
+        );
+
+        filters.push(
+          \`\${bgmBase}[bgm0]\`
+        );
+
+        filters.push(
+          \`[bgm0][sc]sidechaincompress=\` +
+          \`threshold=\${DUCK_THRESHOLD}:\` +
+          \`ratio=\${DUCK_RATIO}:\` +
+          "attack=30:" +
+          "release=500[bgmd]"
+        );
+
+        filters.push(
+          "[voice][bgmd]amix=inputs=2:" +
+          "duration=first:" +
+          "dropout_transition=0:" +
+          "normalize=0," +
+          "alimiter=limit=0.9[a]"
+        );
+      } else {
+        filters.push(
+          \`\${bgmBase},atrim=duration=\${Number(clipDuration).toFixed(2)}[a]\`
+        );
+      }
     }
 
     const command =
-      ffmpeg(rawClipPath);
+      ffmpeg(renderInput);
+
+    if (backgroundPath) {
+      command.input(backgroundPath);
+    }
 
     if (bgmPath) {
       command.input(bgmPath);
     }
 
-    // Render free-tier safety:
-    // one video chain, one x264 thread, no duplicated 4K frames.
-    command.outputOptions([
-      "-threads", "1",
-      "-filter_threads", "1",
-      "-filter_complex_threads", "1",
-    ]);
+    /*
+     * When a 4K background exists:
+     *   input 0 = prepared low-res source
+     *   input 1 = low-res blurred background
+     *   BGM      = input 2
+     *
+     * The audio graph therefore needs the correct BGM input index.
+     */
+    if (bgmPath && backgroundPath) {
+      for (let i = 0; i < filters.length; i++) {
+        filters[i] = filters[i]
+          .replace("[1:a]", "[2:a]");
+      }
+    }
 
     const maps = bgmPath
       ? [
-          "-map",
-          "[v]",
-          "-map",
-          "[a]",
+          "-map", "[v]",
+          "-map", "[a]",
         ]
       : [
-          "-map",
-          "[v]",
-          "-map",
-          "0:a?",
+          "-map", "[v]",
+          "-map", "0:a?",
         ];
 
     command
       .complexFilter(filters)
+      .outputOptions([
+        "-threads", "1",
+        "-filter_threads", "1",
+        "-filter_complex_threads", "1",
+      ])
       .outputOptions(maps)
       .videoCodec("libx264")
       .audioCodec("aac")
       .outputOptions([
-        "-threads",
-        "1",
-
-        "-preset",
-        "ultrafast",
-
-        "-tune",
-        "zerolatency",
-
+        "-threads", "1",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
         "-x264-params",
         "rc-lookahead=0:ref=1:bframes=0",
-
         "-crf",
         is4KOrLarger ? "26" : "23",
-
-        "-pix_fmt",
-        "yuv420p",
-
-        "-b:a",
-        "128k",
-
+        "-pix_fmt", "yuv420p",
+        "-b:a", "128k",
         "-shortest",
-
-        "-movflags",
-        "+faststart",
-
-        "-avoid_negative_ts",
-        "make_zero",
+        "-movflags", "+faststart",
+        "-avoid_negative_ts", "make_zero",
       ])
-
       .on("start", (commandLine) => {
         console.log(
           "[buildEditedClip] FFmpeg command:"
@@ -522,7 +858,6 @@ async function buildEditedClip(
         console.log(commandLine);
         onProgress?.(0);
       })
-
       .on("progress", (progress) => {
         const percent =
           Number(progress?.percent);
@@ -536,7 +871,6 @@ async function buildEditedClip(
           );
         }
       })
-
       .on("stderr", (line) => {
         if (
           line.includes("Error") ||
@@ -546,13 +880,17 @@ async function buildEditedClip(
           line.includes("Killed")
         ) {
           console.error(
-            `[buildEditedClip] ${line}`
+            \`[buildEditedClip] \${line}\`
           );
         }
       })
-
       .on("end", () => {
-        if (!fs.existsSync(outputPath)) {
+        if (
+          !fs.existsSync(outputPath) ||
+          fs.statSync(outputPath).size <= 0
+        ) {
+          cleanupTemp();
+
           return reject(
             new Error(
               "FFmpeg finished but edited clip was not created"
@@ -563,42 +901,34 @@ async function buildEditedClip(
         const size =
           fs.statSync(outputPath).size;
 
-        if (!size) {
-          return reject(
-            new Error(
-              "FFmpeg created an empty edited clip"
-            )
-          );
-        }
-
         console.log(
-          `[buildEditedClip] Created: ${outputPath} (${size} bytes)`
+          \`[buildEditedClip] Created: \${outputPath} (\${size} bytes)\`
         );
 
+        cleanupTemp();
         resolve(outputPath);
       })
+      .on("error", (err, stdout, stderr) => {
+        console.error(
+          "[buildEditedClip] FFmpeg ERROR:",
+          err?.message || err
+        );
 
-      .on(
-        "error",
-        (err, stdout, stderr) => {
+        if (stderr) {
           console.error(
-            "[buildEditedClip] FFmpeg ERROR:",
-            err?.message || err
+            "[buildEditedClip] FFmpeg STDERR:"
           );
-
-          if (stderr) {
-            console.error(
-              "[buildEditedClip] FFmpeg STDERR:"
-            );
-            console.error(stderr);
-          }
-
-          reject(err);
+          console.error(stderr);
         }
-      )
 
+        cleanupTemp();
+        reject(err);
+      })
       .save(outputPath);
-  });
+  } catch (error) {
+    cleanupTemp();
+    throw error;
+  }
 }
 
 // ------------------------------------------------------------
