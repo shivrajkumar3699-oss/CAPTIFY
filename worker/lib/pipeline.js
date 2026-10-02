@@ -476,9 +476,15 @@ async function buildEditedClip(
       ? `${outputPath}.prepared.mp4`
       : null;
 
+  const backgroundPath =
+    is4KOrLarger && mode === "fill"
+      ? `${outputPath}.background.mp4`
+      : null;
+
   const cleanupTemp = () => {
     for (const filePath of [
       preparedPath,
+      backgroundPath,
     ]) {
       if (!filePath) continue;
 
@@ -582,48 +588,122 @@ async function buildEditedClip(
       });
     }
 
+    if (backgroundPath) {
+      await new Promise((resolve, reject) => {
+        const backgroundWidth =
+          Math.max(
+            180,
+            Math.floor(targetWidth / 3 / 2) * 2
+          );
+
+        const backgroundHeight =
+          Math.max(
+            320,
+            Math.floor(targetHeight / 3 / 2) * 2
+          );
+
+        const backgroundCommand =
+          ffmpeg(preparedPath)
+            .videoFilters(
+              `scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
+              `crop=${backgroundWidth}:${backgroundHeight},` +
+              "gblur=sigma=18:steps=1"
+            )
+            .videoCodec("libx264")
+            .outputOptions([
+              "-an",
+              "-threads", "1",
+              "-filter_threads", "1",
+              "-preset", "ultrafast",
+              "-tune", "zerolatency",
+              "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
+              "-crf", "32",
+              "-pix_fmt", "yuv420p",
+              "-movflags", "+faststart",
+              "-avoid_negative_ts", "make_zero",
+            ]);
+
+        backgroundCommand
+          .on("start", (commandLine) => {
+            console.log(
+              "[buildEditedClip] 4K blurred background preparation:"
+            );
+            console.log(commandLine);
+          })
+          .on("stderr", (line) => {
+            if (
+              line.includes("Error") ||
+              line.includes("error") ||
+              line.includes("Invalid") ||
+              line.includes("failed") ||
+              line.includes("Killed")
+            ) {
+              console.error(
+                `[buildEditedClip] background: ${line}`
+              );
+            }
+          })
+          .on("error", (err, stdout, stderr) => {
+            console.error(
+              "[buildEditedClip] background preparation ERROR:",
+              err?.message || err
+            );
+
+            if (stderr) {
+              console.error(
+                "[buildEditedClip] background preparation STDERR:"
+              );
+              console.error(stderr);
+            }
+
+            reject(err);
+          })
+          .on("end", () => {
+            if (
+              !fs.existsSync(backgroundPath) ||
+              fs.statSync(backgroundPath).size <= 0
+            ) {
+              return reject(
+                new Error(
+                  "Blurred background preparation finished but file was not created"
+                )
+              );
+            }
+
+            console.log(
+              `[buildEditedClip] Prepared blurred background: ${backgroundPath} (${fs.statSync(backgroundPath).size} bytes)`
+            );
+
+            resolve();
+          })
+          .save(backgroundPath);
+      });
+    }
+
     const renderInput =
       preparedPath || rawClipPath;
 
     const filters = [];
 
     if (mode === "fill") {
-      // For 4K input, renderInput is already the small prepared source.
-      // Generate the blurred background from that source in the same
-      // final FFmpeg graph instead of encoding a separate background file.
-      filters.push(
-        `[0:v]split=2[bgsrc][fgsrc]`
-      );
+      if (backgroundPath) {
+        const foreground =
+          `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`;
 
-      const backgroundWidth =
-        Math.max(
-          180,
-          Math.floor(targetWidth / 3 / 2) * 2
+        filters.push(
+          `[1:v]scale=${targetWidth}:${targetHeight}[bg]`
         );
 
-      const backgroundHeight =
-        Math.max(
-          320,
-          Math.floor(targetHeight / 3 / 2) * 2
+        filters.push(
+          `[0:v]${foreground},format=yuv420p[fg]`
         );
 
-      filters.push(
-        `[bgsrc]scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
-        `crop=${backgroundWidth}:${backgroundHeight},` +
-        "gblur=sigma=18:steps=1," +
-        `scale=${targetWidth}:${targetHeight}[bg]`
-      );
-
-      filters.push(
-        `[fgsrc]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,format=yuv420p[fg]`
-      );
-
-      filters.push(
-        "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
-        "fade=t=in:st=0:d=0.4," +
-        `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
-        "format=yuv420p[v]"
-      );
+        filters.push(
+          "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
+          "fade=t=in:st=0:d=0.4," +
+          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
+          "format=yuv420p[v]"
+        );
       } else {
         filters.push(
           `[0:v]split=2[bgsrc][fgsrc]`
@@ -720,8 +800,27 @@ async function buildEditedClip(
       const command =
         ffmpeg(renderInput);
 
+    if (backgroundPath) {
+      command.input(backgroundPath);
+    }
+
     if (bgmPath) {
       command.input(bgmPath);
+    }
+
+    /*
+     * When a 4K background exists:
+     *   input 0 = prepared low-res source
+     *   input 1 = low-res blurred background
+     *   BGM      = input 2
+     *
+     * The audio graph therefore needs the correct BGM input index.
+     */
+    if (bgmPath && backgroundPath) {
+      for (let i = 0; i < filters.length; i++) {
+        filters[i] = filters[i]
+          .replace("[1:a]", "[2:a]");
+      }
     }
 
     const maps = bgmPath
