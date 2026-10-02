@@ -756,24 +756,49 @@ async function buildEditedClip(
      */
     // No separate background input is used anymore. BGM remains input 1.
 
-    const maps = bgmPath
-      ? [
-          "-map", "[v]",
-          "-map", "[a]",
-        ]
-      : [
-          "-map", "[v]",
-          "-map", "0:a?",
-        ];
+    // PHASE 3 SAFE FAST PATH:
+    // When no BGM is requested and the video graph is a single input/output
+    // chain, use FFmpeg's simple video filter path instead of a complex graph.
+    // Captions, timing, framing and output pixels remain the same; this only
+    // removes unnecessary filter-graph orchestration for the common path.
+    const canUseSimpleVideoFilter =
+      !bgmPath &&
+      (mode === "fit" || isAlreadyTargetPortrait);
 
-    command
-      .complexFilter(filters)
-      .outputOptions([
-        "-threads", "1",
-        "-filter_threads", "1",
-        "-filter_complex_threads", "1",
-      ])
-      .outputOptions(maps)
+    if (canUseSimpleVideoFilter) {
+      const simpleVideoFilter =
+        filters[0]
+          .replace(/^\\[0:v\\]/, "")
+          .replace(/\\[v\\]$/, "");
+
+      command
+        .videoFilters(simpleVideoFilter)
+        .outputOptions([
+          "-map", "0:v:0",
+          "-map", "0:a?",
+          "-threads", "1",
+          "-filter_threads", "1",
+        ]);
+    } else {
+      const maps = bgmPath
+        ? [
+            "-map", "[v]",
+            "-map", "[a]",
+          ]
+        : [
+            "-map", "[v]",
+            "-map", "0:a?",
+          ];
+
+      command
+        .complexFilter(filters)
+        .outputOptions([
+          "-threads", "1",
+          "-filter_threads", "1",
+          "-filter_complex_threads", "1",
+        ])
+        .outputOptions(maps);
+    }
       .videoCodec("libx264")
       .audioCodec("aac")
       .outputOptions([
