@@ -813,6 +813,7 @@ export default function Home() {
       ) => {
         const CHUNK_SIZE = 8 * 1024 * 1024;
         const MAX_RETRIES = 3;
+        const MAX_FULL_RESTARTS = 2;
 
         const totalBytes = uploadFile.size;
 
@@ -826,188 +827,245 @@ export default function Home() {
           totalBytes / CHUNK_SIZE
         );
 
-        for (
-          let index = 0;
-          index < chunkCount;
-          index++
-        ) {
-          const start =
-            index * CHUNK_SIZE;
+        let fullRestart = 0;
 
-          const end = Math.min(
-            start + CHUNK_SIZE,
-            totalBytes
-          );
+        // Render free instances use ephemeral /tmp storage. If the worker
+        // restarts between chunks, its partial upload disappears. In that
+        // case the worker returns 409/UPLOAD_RESTART_REQUIRED and we restart
+        // THIS upload from chunk 0 instead of killing the whole job.
+        while (fullRestart <= MAX_FULL_RESTARTS) {
+          let restartRequired = false;
 
-          const chunk =
-            uploadFile.slice(
-              start,
-              end,
-              uploadFile.type ||
-                "application/octet-stream"
+          for (
+            let index = 0;
+            index < chunkCount;
+            index++
+          ) {
+            const start =
+              index * CHUNK_SIZE;
+
+            const end = Math.min(
+              start + CHUNK_SIZE,
+              totalBytes
             );
 
-          let attempt = 0;
+            const chunk =
+              uploadFile.slice(
+                start,
+                end,
+                uploadFile.type ||
+                  "application/octet-stream"
+              );
 
-          while (true) {
-            try {
-              await new Promise<void>(
-                (resolve, reject) => {
-                  const xhr =
-                    new XMLHttpRequest();
+            let attempt = 0;
 
-                  xhr.open(
-                    "PUT",
-                    targetUrl,
-                    true
-                  );
+            while (true) {
+              try {
+                await new Promise<void>(
+                  (resolve, reject) => {
+                    const xhr =
+                      new XMLHttpRequest();
 
-                  xhr.timeout = 120000;
-
-                  xhr.setRequestHeader(
-                    "Content-Type",
-                    uploadFile.type ||
-                      "application/octet-stream"
-                  );
-
-                  xhr.setRequestHeader(
-                    "Content-Range",
-                    `bytes ${start}-${end - 1}/${totalBytes}`
-                  );
-
-                  xhr.setRequestHeader(
-                    "X-Chunk-Index",
-                    String(index)
-                  );
-
-                  xhr.setRequestHeader(
-                    "X-Total-Chunks",
-                    String(chunkCount)
-                  );
-
-                  xhr.onload = () => {
-                    if (
-                      xhr.status >= 200 &&
-                      xhr.status < 300
-                    ) {
-                      resolve();
-                      return;
-                    }
-
-                    const responseBody =
-                      String(xhr.responseText || "").trim();
-
-                    reject(
-                      new Error(
-                        `Upload failed (HTTP ${xhr.status})${responseBody ? `: ${responseBody.slice(0, 500)}` : "."}`
-                      )
+                    xhr.open(
+                      "PUT",
+                      targetUrl,
+                      true
                     );
-                  };
 
-                  xhr.onerror = () => {
-                    reject(
-                      new Error(
-                        "Upload connection failed."
-                      )
+                    xhr.timeout = 120000;
+
+                    xhr.setRequestHeader(
+                      "Content-Type",
+                      uploadFile.type ||
+                        "application/octet-stream"
                     );
-                  };
 
-                  xhr.ontimeout = () => {
-                    reject(
-                      new Error(
-                        "Upload request timed out."
-                      )
+                    xhr.setRequestHeader(
+                      "Content-Range",
+                      `bytes ${start}-${end - 1}/${totalBytes}`
                     );
-                  };
 
-                  xhr.onabort = () => {
-                    reject(
-                      new Error(
-                        "Upload request was aborted."
-                      )
+                    xhr.setRequestHeader(
+                      "X-Chunk-Index",
+                      String(index)
                     );
-                  };
 
-                  xhr.upload.onprogress =
-                    (event) => {
+                    xhr.setRequestHeader(
+                      "X-Total-Chunks",
+                      String(chunkCount)
+                    );
+
+                    xhr.onload = () => {
                       if (
-                        !event.lengthComputable
+                        xhr.status >= 200 &&
+                        xhr.status < 300
                       ) {
+                        resolve();
                         return;
                       }
 
-                      const chunkProgress =
-                        event.loaded /
-                        event.total;
+                      const responseBody =
+                        String(
+                          xhr.responseText || ""
+                        ).trim();
 
-                      const overallProgress =
-                        index /
-                          chunkCount +
-                        chunkProgress /
-                          chunkCount;
-
-                      const progress =
-                        progressStart +
-                        overallProgress *
-                          (progressEnd -
-                            progressStart);
-
-                      setUploadProgress(
-                        Math.max(
-                          progressStart,
-                          Math.min(
-                            progressEnd,
-                            progress
+                      // 409 means the worker lost the partial file.
+                      // Let the outer uploader restart from byte 0.
+                      if (
+                        xhr.status === 409 &&
+                        responseBody.includes(
+                          "UPLOAD_RESTART_REQUIRED"
+                        )
+                      ) {
+                        reject(
+                          new Error(
+                            "UPLOAD_RESTART_REQUIRED"
                           )
+                        );
+                        return;
+                      }
+
+                      reject(
+                        new Error(
+                          `Upload failed (HTTP ${xhr.status})${responseBody ? `: ${responseBody.slice(0, 500)}` : "."}`
                         )
                       );
                     };
 
-                  xhr.send(chunk);
+                    xhr.onerror = () => {
+                      reject(
+                        new Error(
+                          "Upload connection failed."
+                        )
+                      );
+                    };
+
+                    xhr.ontimeout = () => {
+                      reject(
+                        new Error(
+                          "Upload request timed out."
+                        )
+                      );
+                    };
+
+                    xhr.onabort = () => {
+                      reject(
+                        new Error(
+                          "Upload request was aborted."
+                        )
+                      );
+                    };
+
+                    xhr.upload.onprogress =
+                      (event) => {
+                        if (
+                          !event.lengthComputable
+                        ) {
+                          return;
+                        }
+
+                        const chunkProgress =
+                          event.loaded /
+                          event.total;
+
+                        const overallProgress =
+                          index /
+                            chunkCount +
+                          chunkProgress /
+                            chunkCount;
+
+                        const progress =
+                          progressStart +
+                          overallProgress *
+                            (progressEnd -
+                              progressStart);
+
+                        setUploadProgress(
+                          Math.max(
+                            progressStart,
+                            Math.min(
+                              progressEnd,
+                              progress
+                            )
+                          )
+                        );
+                      };
+
+                    xhr.send(chunk);
+                  }
+                );
+
+                break;
+              } catch (error) {
+                if (
+                  error instanceof Error &&
+                  error.message ===
+                    "UPLOAD_RESTART_REQUIRED"
+                ) {
+                  restartRequired = true;
+                  break;
                 }
-              );
 
-              break;
-            } catch (error) {
-              if (
-                attempt >= MAX_RETRIES
-              ) {
-                throw error instanceof Error
-                  ? error
-                  : new Error(
-                      "Upload connection failed after several retries."
-                    );
+                if (
+                  attempt >= MAX_RETRIES
+                ) {
+                  throw error instanceof Error
+                    ? error
+                    : new Error(
+                        "Upload connection failed after several retries."
+                      );
+                }
+
+                attempt += 1;
+
+                await new Promise(
+                  (resolve) =>
+                    setTimeout(
+                      resolve,
+                      1000 * attempt
+                    )
+                );
               }
-
-              attempt += 1;
-
-              await new Promise(
-                (resolve) =>
-                  setTimeout(
-                    resolve,
-                    1000 * attempt
-                  )
-              );
             }
+
+            if (restartRequired) {
+              break;
+            }
+
+            const completedProgress =
+              progressStart +
+              ((index + 1) /
+                chunkCount) *
+                (progressEnd -
+                  progressStart);
+
+            setUploadProgress(
+              Math.max(
+                progressStart,
+                Math.min(
+                  progressEnd,
+                  completedProgress
+                )
+              )
+            );
           }
 
-          const completedProgress =
-            progressStart +
-            ((index + 1) /
-              chunkCount) *
-              (progressEnd -
-                progressStart);
+          if (!restartRequired) {
+            return;
+          }
 
-          setUploadProgress(
-            Math.max(
-              progressStart,
-              Math.min(
-                progressEnd,
-                completedProgress
-              )
-            )
+          fullRestart += 1;
+          setUploadProgress(progressStart);
+
+          await new Promise(
+            (resolve) =>
+              setTimeout(resolve, 750)
           );
         }
+
+        throw new Error(
+          "Upload state kept resetting on the worker. Please try this upload again."
+        );
       };
       /*
        * STEP 1
