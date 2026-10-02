@@ -195,6 +195,47 @@ export async function trimVideoForUpload(
       target: new BufferTarget(),
     });
 
+    /*
+     * IMPORTANT:
+     * When resizing 4K video, Mediabunny has to use a browser VideoEncoder.
+     * Letting Conversion pick a codec implicitly caused some browsers to
+     * select a configuration that later failed at VideoEncoder.configure().
+     *
+     * Probe the actual encoder support FIRST and explicitly pass the codec
+     * that this browser can encode at the requested dimensions.
+     */
+    let browserVideoCodec:
+      | Awaited<ReturnType<typeof getFirstEncodableVideoCodec>>
+      | null = null;
+
+    let resizedHeight: number | undefined;
+
+    if (is4KOrLarger) {
+      resizedHeight = Math.max(
+        2,
+        Math.round(
+          (1080 / Math.max(1, sourceWidth)) *
+            sourceHeight /
+            2,
+        ) * 2,
+      );
+
+      browserVideoCodec =
+        await getFirstEncodableVideoCodec(
+          output.format.getSupportedVideoCodecs(),
+          {
+            width: 1080,
+            height: resizedHeight,
+          },
+        );
+
+      if (!browserVideoCodec) {
+        throw new Error(
+          "Your browser does not support the video encoder required to prepare this 4K clip. Please use the latest Chrome or Edge.",
+        );
+      }
+    }
+
     const conversion = await Conversion.init({
       input,
       output,
@@ -205,10 +246,12 @@ export async function trimVideoForUpload(
 
       video: is4KOrLarger
         ? {
-            // Preserve the original aspect ratio while making the uploaded
-            // hook small enough for Render's free memory limit.
+            // Keep the complete 4K hook while reducing its encoded size
+            // before it reaches the Render worker.
             width: 1080,
             fit: "contain",
+            codec: browserVideoCodec!,
+            hardwareAcceleration: "no-preference",
           }
         : undefined,
 
