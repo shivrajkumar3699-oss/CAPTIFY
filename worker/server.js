@@ -1761,7 +1761,8 @@ async function runSmartRender(
               clips,
             });
           }
-        }
+        },
+        normalizedClipInfo
       );
 
       clips.push({
