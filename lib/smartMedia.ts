@@ -181,8 +181,8 @@ export async function trimVideoForUpload(
       );
     }
 
-    const sourceWidth = Number(videoTrack.displayWidth);
-    const sourceHeight = Number(videoTrack.displayHeight);
+    const sourceWidth = await videoTrack.getDisplayWidth();
+    const sourceHeight = await videoTrack.getDisplayHeight();
     const is4KOrLarger =
       Number.isFinite(sourceWidth) &&
       Number.isFinite(sourceHeight) &&
@@ -209,7 +209,6 @@ export async function trimVideoForUpload(
             // hook small enough for Render's free memory limit.
             width: 1080,
             fit: "contain",
-            quality: "medium",
           }
         : undefined,
 
