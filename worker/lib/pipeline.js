@@ -278,10 +278,6 @@ function buildFilterGraph(
   // Render targets:
   // 4K+ source -> 720x1280
   // everything else -> 1080x1920
-  //
-  // IMPORTANT:
-  // Never split the video into a blurred background + foreground.
-  // That duplicates decoded frames and causes heavy memory pressure.
   const is4KOrLarger =
     Math.max(srcW, srcH) >= 2160;
 
@@ -291,41 +287,54 @@ function buildFilterGraph(
   const targetHeight =
     is4KOrLarger ? 1280 : VIDEO_HEIGHT;
 
-  let videoChain;
+  let filters;
 
   if (framing === "fill") {
-    const targetAspect =
-      targetWidth / targetHeight;
+    // "Fill Blurred":
+    // Keep the complete original video visible in the center.
+    // Use a low-resolution blurred copy behind it so 16:9
+    // footage becomes a clean 9:16 composition without cropping
+    // faces, captions, or other important content.
+    //
+    // The background is intentionally processed at 1/4 size
+    // before blur/upscale to keep Render memory usage low.
+    const backgroundWidth =
+      Math.max(180, Math.floor(targetWidth / 3 / 2) * 2);
 
-    const sourceAspect =
-      srcW / srcH;
+    const backgroundHeight =
+      Math.max(320, Math.floor(targetHeight / 3 / 2) * 2);
 
-    let cropW = srcW;
-    let cropH = srcH;
+    const foreground =
+      `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`;
 
-    if (sourceAspect > targetAspect) {
-      cropW = evenFloor(srcH * targetAspect);
-    } else {
-      cropH = evenFloor(srcW / targetAspect);
-    }
-
-    videoChain =
-      `crop=${cropW}:${cropH},` +
+    const background =
+      `scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
+      `crop=${backgroundWidth}:${backgroundHeight},` +
+      `gblur=sigma=18:steps=1,` +
       `scale=${targetWidth}:${targetHeight}`;
-  } else {
-    videoChain =
-      `scale=${targetWidth}:${targetHeight}:` +
-      `force_original_aspect_ratio=decrease,` +
-      `pad=${targetWidth}:${targetHeight}:` +
-      `(ow-iw)/2:(oh-ih)/2:color=black`;
-  }
 
-  const filters = [
-    `[0:v]${videoChain},` +
-      `fade=t=in:st=0:d=0.4,` +
-      `ass='${escapedAss}':shaping=complex,` +
-      `format=yuv420p[v]`,
-  ];
+    filters = [
+      `[0:v]split=2[bgsrc][fgsrc]`,
+      `[bgsrc]${background}[bg]`,
+      `[fgsrc]${foreground},format=yuv420p[fg]`,
+      `[bg][fg]overlay=(W-w)/2:(H-h)/2,` +
+        `fade=t=in:st=0:d=0.4,` +
+        `ass='${escapedAss}':shaping=complex,` +
+        `format=yuv420p[v]`,
+    ];
+  } else {
+    // "Fit frame": complete video with black letterbox/pillarbox.
+    const videoChain =
+      `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
+      `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black`;
+
+    filters = [
+      `[0:v]${videoChain},` +
+        `fade=t=in:st=0:d=0.4,` +
+        `ass='${escapedAss}':shaping=complex,` +
+        `format=yuv420p[v]`,
+    ];
+  }
 
   // Audio
   if (hasBgm) {
