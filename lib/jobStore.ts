@@ -101,8 +101,8 @@ export async function setJobStatus(
 
   await ensureJobSchema();
 
-  const status = patch.status || "queued";
-  const progress = norm(patch.progress);
+  const incomingStatus = patch.status || "queued";
+  const incomingProgress = norm(patch.progress);
   const message = patch.message ?? null;
   const error = patch.error ?? null;
 
@@ -112,17 +112,31 @@ export async function setJobStatus(
       ? JSON.stringify(patch.clips)
       : null;
 
+  /*
+   * Status callbacks can arrive out of order because FFmpeg progress
+   * callbacks are intentionally non-blocking. Never allow an older
+   * rendering update to move a job backwards after it has reached a
+   * higher progress value or DONE.
+   */
   const rows = await sql`
     UPDATE captify_jobs
     SET
-      status = ${status},
-      progress = ${progress},
+      status = CASE
+        WHEN status = 'done' THEN 'done'
+        ELSE ${incomingStatus}
+      END,
+      progress = CASE
+        WHEN ${incomingStatus} = 'done' THEN 100
+        WHEN status = 'done' THEN 100
+        ELSE GREATEST(progress, ${incomingProgress})
+      END,
       message = ${message},
       error = ${error},
       clips = COALESCE(${clips}::jsonb, clips),
       completed_at = CASE
-        WHEN ${status} = 'done'
-        THEN NOW()
+        WHEN ${incomingStatus} = 'done'
+          OR status = 'done'
+        THEN COALESCE(completed_at, NOW())
         ELSE completed_at
       END
     WHERE job_id = ${id}
