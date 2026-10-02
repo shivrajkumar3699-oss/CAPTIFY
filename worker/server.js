@@ -62,6 +62,7 @@ const ALLOWED_EXTENSIONS = new Set([
 ]);
 
 const activeJobStatuses = new Map();
+const activeSmartRenders = new Set();
 
 // ------------------------------------------------------------
 // STARTUP VALIDATION
@@ -947,6 +948,8 @@ app.post(
           err
         );
 
+        activeSmartRenders.delete(cleanJobId);
+
         await pushStatus(
           cleanJobId,
           {
@@ -1276,6 +1279,13 @@ app.post(
         cleanJobId
       );
 
+    if (activeSmartRenders.has(cleanJobId)) {
+      return res.status(409).json({
+        error:
+          "This job is already rendering. Please wait for the current render to finish.",
+      });
+    }
+
     if (!metadata) {
       return res.status(404).json({
         error:
@@ -1380,6 +1390,8 @@ app.post(
             ""
           );
 
+    activeSmartRenders.add(cleanJobId);
+
     runSmartRender(
       cleanJobId,
       segments,
@@ -1407,7 +1419,9 @@ app.post(
           callbackStatusUrl
         );
       }
-    );
+    ).finally(() => {
+      activeSmartRenders.delete(cleanJobId);
+    });
   }
 );
 
