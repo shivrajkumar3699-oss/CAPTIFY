@@ -483,19 +483,27 @@ export default function Home() {
     );
 
   const rawProgress =
-    isDone || lastClipCompleted
+    isDone
       ? 100
       : isProcessing
-        ? Math.max(
-            uploadProgress,
-            Math.max(
+        ? status?.status === "rendering"
+          ? Math.max(
               0,
               Math.min(
-                100,
+                99,
                 Number(status?.progress ?? 0)
               )
             )
-          )
+          : Math.max(
+              uploadProgress,
+              Math.max(
+                0,
+                Math.min(
+                  100,
+                  Number(status?.progress ?? 0)
+                )
+              )
+            )
         : uploadProgress;
 
   const targetProgressRef = useRef(0);
@@ -2633,8 +2641,14 @@ ${timeRange(
                   </div>
 
                   <p className="mt-2 text-sm text-white/35">
-                    {status?.message ||
-                      "Preparing your media..."}
+                    {status?.status === "rendering" &&
+                    typeof status.message === "string" &&
+                    /^Rendering clip\\s+\\d+\\s+of\\s+\\d+$/i.test(
+                      status.message.trim()
+                    )
+                      ? status.message
+                      : status?.message ||
+                        "Preparing your media..."}
                   </p>
 
                   {(uploadSpeed > 0 || uploadEta > 0) && (
