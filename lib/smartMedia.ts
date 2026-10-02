@@ -197,7 +197,10 @@ export async function trimVideoForUpload(
     const is4KOrLarger =
       Number.isFinite(sourceWidth) &&
       Number.isFinite(sourceHeight) &&
-      Math.max(sourceWidth, sourceHeight) >= 2160;
+      (
+        sourceWidth >= 3840 ||
+        sourceHeight >= 3840
+      );
 
     /*
      * IMPORTANT:
