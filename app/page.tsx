@@ -619,18 +619,19 @@ export default function Home() {
       // ETA is based on real clip timing, not the percentage bar.
       // The old percentage-based calculation could drain to "01 sec"
       // while FFmpeg was still rendering the first clip.
-      const clipNumber = renderClipNumber;
-      const clipTotal = renderClipTotal;
-
-      if (
-        !isPreparingHook &&
+      const clipNumber =
+        renderClipNumber === null ? null : renderClipNumber;
+      const clipTotal =
+        renderClipTotal === null ? null : renderClipTotal;
+      const hasValidClipNumbers =
+        typeof clipNumber === "number" &&
+        typeof clipTotal === "number" &&
         Number.isFinite(clipNumber) &&
         Number.isFinite(clipTotal) &&
-        clipNumber !== null &&
-        clipTotal !== null &&
         clipNumber > 0 &&
-        clipTotal > 0
-      ) {
+        clipTotal > 0;
+
+      if (!isPreparingHook && hasValidClipNumbers) {
         if (
           renderLastClipNumberRef.current !== clipNumber ||
           renderClipStartedAtRef.current <= 0
