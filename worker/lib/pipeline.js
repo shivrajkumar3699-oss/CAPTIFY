@@ -493,6 +493,7 @@ async function buildEditedClip(
 
   const cleanupTemp = () => {};
 
+  try {
     const renderInput =
       preparedPath || rawClipPath;
 
