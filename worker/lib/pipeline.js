@@ -175,7 +175,8 @@ async function cutRawClip(
   sourcePath,
   startTime,
   endTime,
-  outputPath
+  outputPath,
+  onProgress
 ) {
   const start =
     Math.max(0, Number(startTime) || 0);
@@ -248,6 +249,27 @@ async function cutRawClip(
           "[cutRawClip] FFmpeg command:"
         );
         console.log(commandLine);
+      })
+      .on("progress", (progress) => {
+        const percent =
+          Number(
+            progress &&
+            progress.percent
+          );
+
+        if (
+          Number.isFinite(percent)
+        ) {
+          onProgress?.(
+            Math.max(
+              0,
+              Math.min(
+                100,
+                percent
+              )
+            )
+          );
+        }
       })
       .on("stderr", (line) => {
         const text = String(line);
