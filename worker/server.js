@@ -17,6 +17,7 @@ const {
 const {
   buildEditedClip,
   getVideoInfo,
+  detectContentCrop,
 } = require("./lib/pipeline");
 
 const {
@@ -1655,7 +1656,16 @@ async function runSmartRender(
         fs.copyFileSync(uploadedClipPath, rawOutPath);
       }
 
-      const normalizedClipInfo = uploadedClipInfo;
+      const contentCrop =
+        await detectContentCrop(
+          uploadedClipPath,
+          uploadedClipInfo
+        );
+
+      const normalizedClipInfo = {
+        ...uploadedClipInfo,
+        contentCrop,
+      };
 
       // ------------------------------------------------------
       // Captions
