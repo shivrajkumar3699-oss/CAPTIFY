@@ -96,9 +96,8 @@ function maskProfanity(word) {
   const token = match[2];
   if (token.length <= 3) return match[1] + "*".repeat(token.length) + match[3];
   const prefix = token.slice(0, 2);
-  const suffix = token.slice(Math.max(2, token.length - 3));
-  const middle = Math.max(1, token.length - prefix.length - suffix.length);
-  return match[1] + prefix + "*".repeat(middle) + suffix + match[3];
+  const suffix = token.slice(3);
+  return match[1] + prefix + "*" + suffix + match[3];
 }
 
 function buildAssHeader(fontName, marginV = 190) {
