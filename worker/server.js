@@ -15,9 +15,11 @@ const {
 } = require("./lib/detectHooks");
 
 const {
+  VIDEO_WIDTH,
+  VIDEO_HEIGHT,
   buildEditedClip,
   getVideoInfo,
-  detectContentCrop,
+  cutRawClip,
 } = require("./lib/pipeline");
 
 const {
@@ -61,10 +63,83 @@ const ALLOWED_EXTENSIONS = new Set([
   "wav",
   "mp4",
   "mkv",
+  "mov",
 ]);
 
 const activeJobStatuses = new Map();
 const activeSmartRenders = new Set();
+
+const BUILD_COMMIT =
+  process.env.RENDER_GIT_COMMIT ||
+  process.env.RENDER_GIT_COMMIT_SHA ||
+  "unknown";
+
+const PIPELINE_VERSION =
+  "2026-10-normalize-runtime-framing-v1";
+
+const STATUS_DIR = path.join(
+  STORAGE_DIR || "",
+  "status"
+);
+
+function getPersistentStatusPath(jobId) {
+  return path.join(
+    STATUS_DIR,
+    String(jobId) + ".json"
+  );
+}
+
+function savePersistentStatus(jobId, status) {
+  if (!STORAGE_DIR) return;
+
+  fs.mkdirSync(
+    STATUS_DIR,
+    { recursive: true }
+  );
+
+  const target =
+    getPersistentStatusPath(jobId);
+
+  const temp =
+    target + ".tmp";
+
+  fs.writeFileSync(
+    temp,
+    JSON.stringify(status, null, 2),
+    "utf8"
+  );
+
+  fs.renameSync(
+    temp,
+    target
+  );
+}
+
+function loadPersistentStatus(jobId) {
+  if (!STORAGE_DIR) return null;
+
+  const target =
+    getPersistentStatusPath(jobId);
+
+  if (!fs.existsSync(target)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(
+      fs.readFileSync(
+        target,
+        "utf8"
+      )
+    );
+  } catch (error) {
+    console.warn(
+      "[status] Could not read persistent status:",
+      error?.message || error
+    );
+    return null;
+  }
+}
 
 // ------------------------------------------------------------
 // STARTUP VALIDATION
@@ -200,13 +275,36 @@ async function pushStatus(
   statusBaseUrl = NEXT_APP_URL
 ) {
   const previous =
-    activeJobStatuses.get(jobId) || {};
+    activeJobStatuses.get(jobId) ||
+    loadPersistentStatus(jobId) ||
+    {};
 
-  activeJobStatuses.set(jobId, {
+  const nextStatus = {
     ...previous,
     jobId,
     ...statusUpdate,
-  });
+    updatedAt:
+      new Date().toISOString(),
+  };
+
+  activeJobStatuses.set(
+    jobId,
+    nextStatus
+  );
+
+  try {
+    savePersistentStatus(
+      jobId,
+      nextStatus
+    );
+  } catch (error) {
+    console.warn(
+      "[" +
+      jobId +
+      "] Could not persist status:",
+      error?.message || error
+    );
+  }
 
   if (!statusBaseUrl) {
     console.error(
@@ -285,6 +383,27 @@ async function pushStatus(
 }
 
 // ------------------------------------------------------------
+// BUILD VERSION
+// ------------------------------------------------------------
+
+app.get(
+  "/version",
+  (req, res) => {
+    return res.json({
+      ok: true,
+      commit: BUILD_COMMIT,
+      pipeline: PIPELINE_VERSION,
+      output: {
+        width: VIDEO_WIDTH,
+        height: VIDEO_HEIGHT,
+      },
+      instanceId:
+        WORKER_INSTANCE_ID,
+    });
+  }
+);
+
+// ------------------------------------------------------------
 // LIVE STATUS ENDPOINT
 // ------------------------------------------------------------
 
@@ -302,7 +421,8 @@ app.get(
     }
 
     const status =
-      activeJobStatuses.get(jobId);
+      activeJobStatuses.get(jobId) ||
+      loadPersistentStatus(jobId);
 
     if (!status) {
       return res.status(404).json({
@@ -1466,9 +1586,9 @@ async function runSmartRender(
       : "#FFD700";
 
   const framing =
-    options.framing === "fill"
-      ? "fill"
-      : "fit";
+    options.framing === "fit"
+      ? "fit"
+      : "fill";
 
   const useBgm =
     Boolean(
@@ -1482,6 +1602,24 @@ async function runSmartRender(
     )
       ? metadata.captionWords
       : metadata.words;
+
+  console.log(
+    "[worker] build",
+    BUILD_COMMIT,
+    "pipeline",
+    PIPELINE_VERSION
+  );
+
+  console.log(
+    "[" +
+      jobId +
+      "] render start target=" +
+      VIDEO_WIDTH +
+      "x" +
+      VIDEO_HEIGHT +
+      " framing=" +
+      (options.framing === "fit" ? "fit" : "fill")
+  );
 
   const usedBgmFiles =
     new Set();
@@ -1599,81 +1737,82 @@ async function runSmartRender(
       );
 
       // ------------------------------------------------------
-      // The uploaded browser-trimmed hook becomes the raw clip.
-      // NO original 3 GB video is used here.
+      // Normalize the browser-trimmed hook.
+      //
+      // Stream copy is intentionally NOT used. The selected hook may
+      // contain rotation/display-matrix/SAR metadata that does not match
+      // its decoded frame orientation. cutRawClip() decodes it, lets
+      // FFmpeg autorotate the pixels, forces SAR 1:1 and caps the long
+      // side at 1280 for Render Free memory safety.
       // ------------------------------------------------------
 
+      await reportStatus({
+        status: "rendering",
+        progress:
+          50 +
+          Math.round(
+            (i / total) * 5
+          ),
+        message:
+          "Normalizing clip " +
+          clipNum +
+          " of " +
+          total,
+        clips,
+      });
+
       const uploadedClipInfo =
-        await getVideoInfo(uploadedClipPath);
+        await getVideoInfo(
+          uploadedClipPath
+        );
 
-      // FAST PATH:
-      // A normal square-pixel 9:16 browser clip is already render-ready.
-      // Do not encode it a second time just to normalize metadata.
-      // This removes one full FFmpeg encode from the common path.
-      const sarParts = String(
-        uploadedClipInfo.sampleAspectRatio || "1:1"
-      ).split(":");
-
-      const sarNum =
-        Number(sarParts[0]) || 1;
-
-      const sarDen =
-        Number(sarParts[1]) || 1;
-
-      const displayWidth =
-        uploadedClipInfo.codedWidth *
-        (sarNum / sarDen);
-
-      const displayHeight =
-        uploadedClipInfo.codedHeight;
-
-      const displayRatio =
-        displayHeight > 0
-          ? displayWidth / displayHeight
-          : 0;
-
-      const isNormalNineBySixteen =
-        uploadedClipInfo.sampleAspectRatio === "1:1" &&
-        !uploadedClipInfo.applyRotation &&
-        Number.isFinite(displayRatio) &&
-        displayRatio >= 0.555 &&
-        displayRatio <= 0.57;
-
-      // PHASE 7: do not encode a normalized intermediate.
-      // The final FFmpeg render now fixes SAR/rotation/framing/captions in one pass.
-      // Keep rawUrl behavior by linking the uploaded browser clip when possible.
       console.log(
-        `[${jobId}] smart clip ${clipNum}: PHASE 7 — one-pass render (no normalization encode)`
+        "[" +
+          jobId +
+          "] smart clip " +
+          clipNum +
+          ": uploaded source=" +
+          uploadedClipInfo.width +
+          "x" +
+          uploadedClipInfo.height +
+          " sar=" +
+          uploadedClipInfo.sampleAspectRatio +
+          " rotation=" +
+          uploadedClipInfo.rotation
       );
 
-      try {
-        fs.linkSync(uploadedClipPath, rawOutPath);
-      } catch (linkError) {
-        console.warn(
-          `[${jobId}] smart clip ${clipNum}: hard link unavailable, falling back to copy:`,
-          linkError?.message || linkError
-        );
-        fs.copyFileSync(uploadedClipPath, rawOutPath);
-      }
+      await cutRawClip(
+        uploadedClipPath,
+        0,
+        clipDuration,
+        rawOutPath
+      );
 
-      const contentCrop =
-        await detectContentCrop(
-          uploadedClipPath,
-          uploadedClipInfo
+      const normalizedClipInfo =
+        await getVideoInfo(
+          rawOutPath
         );
 
-      const normalizedClipInfo = {
-        ...uploadedClipInfo,
-        contentCrop,
-      };
+      console.log(
+        "[" +
+          jobId +
+          "] smart clip " +
+          clipNum +
+          ": normalized=" +
+          normalizedClipInfo.width +
+          "x" +
+          normalizedClipInfo.height +
+          " sar=" +
+          normalizedClipInfo.sampleAspectRatio +
+          " rotation=" +
+          normalizedClipInfo.rotation
+      );
 
       // ------------------------------------------------------
       // Captions
       //
-      // captionWords still contain ORIGINAL VIDEO timestamps.
-      // buildAssCaptions shifts them relative to startTime.
-      // Pass the uploaded clip dimensions so captions sit just
-      // above the visible source video instead of below it.
+      // buildAssCaptions uses the same OUT_W/OUT_H constants as FFmpeg,
+      // so PlayResX/PlayResY, font size and margins scale together.
       // ------------------------------------------------------
 
       buildAssCaptions(
@@ -1682,8 +1821,8 @@ async function runSmartRender(
         endTime,
         captionColor,
         assPath,
-        1080,
-        1920
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT
       );
 
       // ------------------------------------------------------
@@ -2036,6 +2175,18 @@ app.listen(
 
     console.log(
       "SMART FLOW = browser audio extraction + selected hook uploads"
+    );
+
+    console.log(
+      "[worker] build",
+      BUILD_COMMIT,
+      "pipeline",
+      PIPELINE_VERSION
+    );
+
+    console.log(
+      "[worker] target",
+      VIDEO_WIDTH + "x" + VIDEO_HEIGHT
     );
   }
 );
