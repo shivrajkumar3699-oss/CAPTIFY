@@ -735,6 +735,14 @@ export default function Home() {
   const highestProgressRef = useRef(0);
   const terminalStatusRef = useRef(false);
 
+  // If the same job status stops changing for 3 minutes, the worker is
+  // considered stalled/restarted. This prevents the UI from remaining at
+  // 75% forever after an abrupt Render worker restart.
+  const statusHeartbeatRef = useRef({
+    signature: "",
+    lastChangeAt: 0,
+  });
+
   const stopPolling = useCallback(() => {
     pollingCancelRef.current?.();
     pollingCancelRef.current = null;
@@ -855,6 +863,26 @@ export default function Home() {
 
         const data = (await response.json()) as JobStatus;
 
+        const statusSignature =
+          [
+            data.status || "",
+            Number(data.progress) || 0,
+            data.message || "",
+            Array.isArray(data.clips)
+              ? data.clips.length
+              : 0,
+          ].join("|");
+
+        if (
+          statusHeartbeatRef.current.signature !==
+          statusSignature
+        ) {
+          statusHeartbeatRef.current = {
+            signature: statusSignature,
+            lastChangeAt: Date.now(),
+          };
+        }
+
         // Status must only move forward. Even if a cached/late response ever
         // arrives, it can never pull the UI back from 100% to 41%.
         if (terminalStatusRef.current) {
@@ -949,6 +977,11 @@ export default function Home() {
 
       let cancelled = false;
 
+      statusHeartbeatRef.current = {
+        signature: "",
+        lastChangeAt: Date.now(),
+      };
+
       const poll = async () => {
         if (cancelled) return;
 
@@ -956,10 +989,40 @@ export default function Home() {
 
         if (cancelled) return;
 
+        if (
+          !terminalStatusRef.current &&
+          statusHeartbeatRef.current.lastChangeAt > 0 &&
+          Date.now() -
+            statusHeartbeatRef.current.lastChangeAt >=
+            180000
+        ) {
+          const message =
+            "Worker restarted, please retry.";
+
+          setError(message);
+
+          setStatus((current) => ({
+            ...(current || {
+              jobId: id,
+              progress: highestProgressRef.current,
+            }),
+            jobId: id,
+            status: "error",
+            error: message,
+            message,
+          }));
+
+          stopPolling();
+          return;
+        }
+
         // Wait until the previous request has fully completed before making
         // another request. This prevents out-of-order responses from an
-        // older 41% status overwriting a newer 100%/done status.
-        pollingRef.current = setTimeout(poll, 2500);
+        // older status overwriting a newer status.
+        pollingRef.current = setTimeout(
+          poll,
+          2500
+        );
       };
 
       poll();
@@ -1080,6 +1143,11 @@ export default function Home() {
     uploadProgressRef.current = 0;
     highestProgressRef.current = 0;
     terminalStatusRef.current = false;
+
+    statusHeartbeatRef.current = {
+      signature: "",
+      lastChangeAt: Date.now(),
+    };
 
     setUploadProgress(0);
     setUploadSpeed(0);
