@@ -8,8 +8,8 @@ if (ffmpegPath) {
   ffmpeg.setFfmpegPath(ffmpegPath);
 }
 
-const VIDEO_WIDTH = 1080;
-const VIDEO_HEIGHT = 1920;
+const VIDEO_WIDTH = Number(process.env.OUT_W) || 1080;
+const VIDEO_HEIGHT = Number(process.env.OUT_H) || 1920;
 
 // ------------------------------------------------------------
 // Background music settings
@@ -23,21 +23,13 @@ const DUCK_RATIO = 3;
 // Helpers
 // ------------------------------------------------------------
 
-function evenRound(n) {
-  return Math.max(2, Math.round(n / 2) * 2);
-}
-
-function evenFloor(n) {
-  return Math.max(2, Math.floor(n / 2) * 2);
-}
-
 function getVideoDuration(sourcePath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(sourcePath, (err, metadata) => {
       if (err) {
         return reject(
           new Error(
-            `Could not read video duration: ${err.message}`
+            "Could not read video duration: " + err.message
           )
         );
       }
@@ -65,300 +57,294 @@ function getVideoDuration(sourcePath) {
 function getVideoInfo(videoPath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(videoPath, (err, metadata) => {
-      if (err) return reject(new Error("Could not read video information: " + err.message));
-      const streams = (metadata && metadata.streams) || [];
-      const stream = streams.find((s) => s.codec_type === "video");
-      if (!stream || !stream.width || !stream.height) return reject(new Error("Could not read video size"));
-      const hasAudio = streams.some((s) => s.codec_type === "audio");
+      if (err) {
+        return reject(
+          new Error(
+            "Could not read video information: " +
+            err.message
+          )
+        );
+      }
+
+      const streams =
+        (metadata && metadata.streams) || [];
+
+      const stream =
+        streams.find(
+          (item) => item.codec_type === "video"
+        );
+
+      if (
+        !stream ||
+        !stream.width ||
+        !stream.height
+      ) {
+        return reject(
+          new Error("Could not read video size")
+        );
+      }
+
+      const hasAudio =
+        streams.some(
+          (item) => item.codec_type === "audio"
+        );
+
       let rotation = 0;
-      if (stream.tags && stream.tags.rotate != null) rotation = Number(stream.tags.rotate) || 0;
-      if (Array.isArray(stream.side_data_list)) {
-        for (const sd of stream.side_data_list) if (typeof sd.rotation === "number") rotation = sd.rotation;
+
+      if (
+        stream.tags &&
+        stream.tags.rotate != null
+      ) {
+        rotation =
+          Number(stream.tags.rotate) || 0;
       }
-      const codedWidth = Number(stream.width);
-      const codedHeight = Number(stream.height);
-      let sarNum = 1, sarDen = 1;
-      if (stream.sample_aspect_ratio) {
-        const match = String(stream.sample_aspect_ratio).match(/^(\\d+):(\\d+)$/);
-        if (match) { sarNum = Number(match[1]) || 1; sarDen = Number(match[2]) || 1; }
+
+      if (
+        Array.isArray(
+          stream.side_data_list
+        )
+      ) {
+        for (
+          const sideData of stream.side_data_list
+        ) {
+          if (
+            typeof sideData.rotation === "number"
+          ) {
+            rotation =
+              sideData.rotation;
+          }
+        }
       }
-      const displayWidth = codedWidth * sarNum / sarDen;
-      const displayHeight = codedHeight;
-      const displayIsPortrait = displayHeight > displayWidth;
-      const quarterTurn = Math.abs(rotation) % 180 === 90;
-      const applyRotation = quarterTurn && !displayIsPortrait;
-      const width = applyRotation ? codedHeight : codedWidth;
-      const height = applyRotation ? codedWidth : codedHeight;
-      console.log("[getVideoInfo] ffprobe video stream:");
-      console.log(JSON.stringify({
-        path: videoPath, codedWidth, codedHeight,
-        sample_aspect_ratio: stream.sample_aspect_ratio || "1:1",
-        display_aspect_ratio: stream.display_aspect_ratio || null,
-        rotation, side_data_list: stream.side_data_list || [], tags: stream.tags || {},
-        computedDisplayWidth: Number(displayWidth.toFixed(3)),
-        computedDisplayHeight: Number(displayHeight.toFixed(3)),
-        displayGeometry: displayWidth >= displayHeight ? "landscape" : "portrait",
-        applyRotation, finalWidth: width, finalHeight: height
-      }, null, 2));
-      resolve({ width, height, codedWidth, codedHeight, sampleAspectRatio: sarNum + ":" + sarDen, rotation, applyRotation, hasAudio });
+
+      const sampleAspectRatio =
+        String(
+          stream.sample_aspect_ratio ||
+          "1:1"
+        );
+
+      console.log(
+        "[getVideoInfo] " +
+        JSON.stringify(
+          {
+            path: videoPath,
+            width: Number(stream.width),
+            height: Number(stream.height),
+            sample_aspect_ratio:
+              sampleAspectRatio,
+            display_aspect_ratio:
+              stream.display_aspect_ratio ||
+              null,
+            rotation,
+            hasAudio,
+          },
+          null,
+          2
+        )
+      );
+
+      resolve({
+        width: Number(stream.width),
+        height: Number(stream.height),
+        codedWidth: Number(stream.width),
+        codedHeight: Number(stream.height),
+        sampleAspectRatio,
+        rotation,
+        applyRotation:
+          Math.abs(rotation) % 180 === 90,
+        hasAudio,
+      });
     });
   });
 }
-// ------------------------------------------------------------
-// Content-crop detection
-// ------------------------------------------------------------
-
-async function detectContentCrop(sourcePath, info) {
-  if (!info || info.sampleAspectRatio !== "1:1" || info.applyRotation || !Number.isFinite(info.width) || !Number.isFinite(info.height) || info.width < 240 || info.height < 240) return null;
-  const duration = await getVideoDuration(sourcePath);
-  const sampleDuration = Math.min(2, Math.max(0.5, duration));
-  const sampleStart = Math.max(0, Math.min(Math.max(0, duration - sampleDuration), duration * 0.5 - sampleDuration * 0.5));
-  return await new Promise((resolve) => {
-    const stderrLines = [];
-    const command = ffmpeg(sourcePath).setStartTime(sampleStart).setDuration(sampleDuration)
-      .videoFilters("cropdetect=limit=0.08:round=2:reset=0")
-      .outputOptions(["-an", "-f", "null"])
-      .on("stderr", (line) => stderrLines.push(String(line)))
-      .on("end", () => {
-        const candidates = [];
-        for (const line of stderrLines) {
-          const match = line.match(/crop=(\\d+):(\\d+):(\\d+):(\\d+)/);
-          if (match) candidates.push({ width:Number(match[1]), height:Number(match[2]), x:Number(match[3]), y:Number(match[4]) });
-        }
-        if (!candidates.length) return resolve(null);
-        const counts = new Map();
-        for (const c of candidates) { const key = c.width+":"+c.height+":"+c.x+":"+c.y; counts.set(key,(counts.get(key)||0)+1); }
-        candidates.sort((a,b) => { const ak=a.width+":"+a.height+":"+a.x+":"+a.y; const bk=b.width+":"+b.height+":"+b.x+":"+b.y; return (counts.get(bk)||0)-(counts.get(ak)||0); });
-        const crop = candidates[0];
-
-        if (
-          crop.width < 240 ||
-          crop.height < 240 ||
-          crop.x < 0 ||
-          crop.y < 0 ||
-          crop.x + crop.width > Number(info.width) ||
-          crop.y + crop.height > Number(info.height)
-        ) {
-          return resolve(null);
-        }
-
-        /*
-         * Browser-trimmed landscape clips can already be inside a 1080x1920
-         * canvas. cropdetect can include the black area below the real 16:9
-         * picture when captions/text exist there.
-         *
-         * Example from the user's failing clip:
-         *   detected: 1080x1056 at y=656
-         *   real picture: 1080x608 at y=656
-         *
-         * When the detected region spans the full width and is clearly
-         * landscape, recover the actual 16:9 picture height instead of
-         * scaling the black lower area into the final video.
-         */
-        const fullWidth =
-          crop.width >= Number(info.width) * 0.98;
-
-        const detectedLandscape =
-          crop.width / Math.max(1, crop.height) >= 1.30;
-
-        if (fullWidth && detectedLandscape) {
-          const inferredHeight =
-            Math.round(
-              (crop.width * 9) / 16 / 2
-            ) * 2;
-
-          if (
-            inferredHeight >= 240 &&
-            inferredHeight <= crop.height
-          ) {
-            const inferredCrop = {
-              width: crop.width,
-              height: inferredHeight,
-              x: crop.x,
-              y: crop.y,
-            };
-
-            console.log(
-              "[detectContentCrop] Recovered embedded 16:9 picture:",
-              inferredCrop
-            );
-
-            return resolve(inferredCrop);
-          }
-        }
-
-        const fullArea =
-          Number(info.width) * Number(info.height);
-
-        const areaRatio =
-          fullArea > 0
-            ? (crop.width * crop.height) / fullArea
-            : 1;
-
-        const verticalTrim =
-          Number(info.height) - crop.height;
-
-        const horizontalTrim =
-          Number(info.width) - crop.width;
-
-        if (
-          areaRatio >= 0.88 &&
-          verticalTrim < Number(info.height) * 0.08 &&
-          horizontalTrim < Number(info.width) * 0.08
-        ) {
-          return resolve(null);
-        }
-
-        console.log(
-          "[detectContentCrop] Embedded/letterboxed content detected:",
-          crop
-        );
-
-        resolve(crop);
-      })
-      .on("error", (err) => { console.warn("[detectContentCrop] cropdetect failed; using full frame:", err?.message || err); resolve(null); });
-    command.output(process.platform === "win32" ? "NUL" : "/dev/null").run();
-  });
-}
 
 // ------------------------------------------------------------
-// Raw clip
+// Raw clip normalization
 // ------------------------------------------------------------
 
-// Normalize browser-trimmed MP4s before rendering.
-// This deliberately removes broken SAR and stale rotation metadata.
-async function normalizeClipForRender(sourcePath, outputPath, info) {
-  const shouldRotate = Boolean(info && info.applyRotation);
-  const rotationFilter = shouldRotate ? (Number(info.rotation) < 0 ? "transpose=2," : "transpose=1,") : "";
-  return new Promise((resolve, reject) => {
-    ffmpeg(sourcePath)
-      .inputOptions(["-noautorotate"])
-      .videoFilters(
-        rotationFilter +
-        "scale=w='if(gt(iw*sar,ih),1280,trunc(iw*sar*1280/ih/2)*2)':h='if(gt(iw*sar,ih),trunc(ih*1280/(iw*sar)/2)*2,1280)',setsar=1"
-      )
-      .videoCodec("libx264")
-      .audioCodec("aac")
-      .outputOptions([
-        "-map", "0:v:0?", "-map", "0:a:0?",
-        "-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1",
-        "-preset", "ultrafast", "-tune", "zerolatency",
-        "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
-        "-crf", "26", "-pix_fmt", "yuv420p", "-b:a", "128k",
-        "-shortest", "-movflags", "+faststart", "-avoid_negative_ts", "make_zero"
-      ])
-      .on("start", (line) => { console.log("[normalizeClipForRender] FFmpeg command:"); console.log(line); })
-      .on("stderr", (line) => { if (/Error|error|Invalid|failed|Killed/.test(line)) console.error("[normalizeClipForRender] " + line); })
-      .on("error", (err, stdout, stderr) => {
-        console.error("[normalizeClipForRender] FFmpeg ERROR:", err && err.message ? err.message : err);
-        if (stderr) console.error(stderr);
-        reject(err);
-      })
-      .on("end", () => {
-        if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size <= 0) return reject(new Error("Clip normalization finished but normalized clip was not created"));
-        console.log("[normalizeClipForRender] Created: " + outputPath + " (" + fs.statSync(outputPath).size + " bytes)");
-        resolve(outputPath);
-      })
-      .save(outputPath);
-  });
-}
+/*
+ * Browser-generated trims can carry rotation/display-matrix metadata,
+ * anamorphic SAR, or coded dimensions that do not match the displayed
+ * orientation. Never stream-copy those files.
+ *
+ * This function decodes the selected range, lets FFmpeg autorotate the
+ * decoded frames, preserves the actual aspect ratio, forces SAR 1:1 and
+ * caps the long side at 1280 pixels. The result is the stable input for
+ * the final caption/BGM render.
+ */
 async function cutRawClip(
   sourcePath,
   startTime,
   endTime,
   outputPath
 ) {
-  const duration = Math.max(
-    0.1,
-    Number(endTime) - Number(startTime)
-  );
+  const start =
+    Math.max(0, Number(startTime) || 0);
 
-  console.log(`[cutRawClip] source=${sourcePath}`);
+  const duration =
+    Math.max(
+      0.1,
+      (Number(endTime) || 0) - start
+    );
+
   console.log(
-    `[cutRawClip] start=${Number(startTime).toFixed(3)} duration=${duration.toFixed(3)}`
+    "[cutRawClip] source=" + sourcePath
   );
 
-  const info = await getVideoInfo(sourcePath);
-  const is4KOrLarger = Math.max(info.width, info.height) >= 2160;
+  console.log(
+    "[cutRawClip] start=" +
+      start.toFixed(3) +
+      " duration=" +
+      duration.toFixed(3)
+  );
 
   return new Promise((resolve, reject) => {
-    const command = ffmpeg(sourcePath)
-      .setStartTime(Number(startTime))
-      .setDuration(duration)
-      .outputOptions([
-        "-map", "0:v:0?",
-        "-map", "0:a:0?",
-        "-avoid_negative_ts", "make_zero",
-      ]);
-
-    if (is4KOrLarger) {
-      console.log(
-        `[cutRawClip] 4K source detected (${info.width}x${info.height}); creating 720x1280 low-memory intermediate`
-      );
-
-      command
-        .videoFilters("scale=720:1280")
+    const command =
+      ffmpeg(sourcePath)
+        .inputOptions([
+          "-threads",
+          "1",
+          "-ss",
+          start.toFixed(3),
+          "-t",
+          duration.toFixed(3),
+        ])
+        .videoFilters(
+          "scale=w='if(gt(iw,ih),min(1280,iw),-2)':" +
+          "h='if(gt(iw,ih),-2,min(1280,ih))'," +
+          "setsar=1"
+        )
         .videoCodec("libx264")
         .audioCodec("aac")
         .outputOptions([
-          "-threads", "1",
-          "-filter_threads", "1",
-          "-preset", "ultrafast",
-          "-tune", "zerolatency",
-          "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
-          "-crf", "26",
-          "-pix_fmt", "yuv420p",
-          "-b:a", "128k",
-          "-movflags", "+faststart",
+          "-map",
+          "0:v:0?",
+          "-map",
+          "0:a:0?",
+          "-threads",
+          "1",
+          "-filter_threads",
+          "1",
+          "-preset",
+          "ultrafast",
+          "-x264-params",
+          "rc-lookahead=0:ref=1:bframes=0",
+          "-crf",
+          "20",
+          "-pix_fmt",
+          "yuv420p",
+          "-b:a",
+          "128k",
+          "-movflags",
+          "+faststart",
+          "-metadata:s:v:0",
+          "rotate=0",
+          "-avoid_negative_ts",
+          "make_zero",
         ]);
-    } else {
-      command.outputOptions([
-        "-c", "copy",
-        "-movflags", "+faststart",
-      ]);
-    }
 
     command
       .on("start", (commandLine) => {
-        console.log("[cutRawClip] FFmpeg command:");
+        console.log(
+          "[cutRawClip] FFmpeg command:"
+        );
         console.log(commandLine);
       })
       .on("stderr", (line) => {
+        const text = String(line);
+
         if (
-          line.includes("Error") ||
-          line.includes("error") ||
-          line.includes("Invalid") ||
-          line.includes("failed")
+          /Error|Invalid|failed|Killed|Conversion failed/i.test(
+            text
+          )
         ) {
-          console.error(`[cutRawClip] ${line}`);
-        }
-      })
-      .on("end", () => {
-        if (!require("fs").existsSync(outputPath)) {
-          return reject(
-            new Error("FFmpeg finished but raw clip was not created")
+          console.error(
+            "[cutRawClip] " + text
           );
         }
-
-        const size = require("fs").statSync(outputPath).size;
-
-        if (!size) {
-          return reject(new Error("FFmpeg created an empty raw clip"));
-        }
-
-        console.log(`[cutRawClip] Created: ${outputPath} (${size} bytes)`);
-        resolve(outputPath);
       })
-      .on("error", (err, stdout, stderr) => {
-        console.error("[cutRawClip] FFmpeg ERROR:", err.message);
-        if (stderr) {
-          console.error("[cutRawClip] FFmpeg STDERR:", stderr);
+      .on(
+        "error",
+        (err, stdout, stderr) => {
+          console.error(
+            "[cutRawClip] FFmpeg ERROR:",
+            err && err.message
+              ? err.message
+              : err
+          );
+
+          if (stderr) {
+            console.error(
+              "[cutRawClip] FFmpeg STDERR:"
+            );
+            console.error(stderr);
+          }
+
+          reject(err);
         }
-        reject(err);
+      )
+      .on("end", async () => {
+        try {
+          if (
+            !fs.existsSync(outputPath)
+          ) {
+            throw new Error(
+              "FFmpeg finished but raw clip was not created"
+            );
+          }
+
+          const size =
+            fs.statSync(
+              outputPath
+            ).size;
+
+          if (!size) {
+            throw new Error(
+              "FFmpeg created an empty raw clip"
+            );
+          }
+
+          const normalizedInfo =
+            await getVideoInfo(
+              outputPath
+            );
+
+          console.log(
+            "[cutRawClip] NORMALIZED clip: " +
+            normalizedInfo.width +
+            "x" +
+            normalizedInfo.height +
+            " sar=" +
+            normalizedInfo.sampleAspectRatio +
+            " rotation=" +
+            normalizedInfo.rotation
+          );
+
+          resolve(outputPath);
+        } catch (error) {
+          reject(error);
+        }
       })
       .save(outputPath);
   });
 }
+
+// Backward-compatible name for any older caller.
+async function normalizeClipForRender(
+  sourcePath,
+  outputPath,
+  info
+) {
+  const duration =
+    await getVideoDuration(sourcePath);
+
+  return cutRawClip(
+    sourcePath,
+    0,
+    duration,
+    outputPath
+  );
+}
+
 // ------------------------------------------------------------
 // ASS path escaping
 // ------------------------------------------------------------
@@ -380,6 +366,11 @@ function escapePathForFilter(filePath) {
 // Filter graph
 // ------------------------------------------------------------
 
+/*
+ * IMPORTANT:
+ * No source width/height is used to calculate framing.
+ * FFmpeg's runtime scale expressions inspect iw/ih directly.
+ */
 function buildFilterGraph(
   info,
   framing,
@@ -387,127 +378,166 @@ function buildFilterGraph(
   hasBgm,
   clipDuration
 ) {
-  const srcW = Number(info.width);
-  const srcH = Number(info.height);
+  const W = VIDEO_WIDTH;
+  const H = VIDEO_HEIGHT;
 
-  if (
-    !Number.isFinite(srcW) ||
-    !Number.isFinite(srcH) ||
-    srcW <= 0 ||
-    srcH <= 0
-  ) {
-    throw new Error("Invalid source video dimensions");
-  }
+  const captionFilter =
+    "ass='" +
+    escapedAss +
+    "':original_size=" +
+    W +
+    "x" +
+    H +
+    ":shaping=complex";
 
-  // Render targets:
-  // 4K+ source -> 720x1280
-  // everything else -> 1080x1920
-  const is4KOrLarger =
-    Math.max(srcW, srcH) >= 2160;
-
-  const targetWidth =
-    is4KOrLarger ? 720 : VIDEO_WIDTH;
-
-  const targetHeight =
-    is4KOrLarger ? 1280 : VIDEO_HEIGHT;
-
-  let filters;
+  let filters = [];
 
   if (framing === "fill") {
-    // "Fill Blurred":
-    // Keep the complete original video visible in the center.
-    // Use a low-resolution blurred copy behind it so 16:9
-    // footage becomes a clean 9:16 composition without cropping
-    // faces, captions, or other important content.
-    //
-    // The background is intentionally processed at 1/4 size
-    // before blur/upscale to keep Render memory usage low.
-    const backgroundWidth =
-      Math.max(180, Math.floor(targetWidth / 3 / 2) * 2);
-
-    const backgroundHeight =
-      Math.max(320, Math.floor(targetHeight / 3 / 2) * 2);
-
-    const foreground =
-      `setsar=1,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,setsar=1`;
-
-    const background =
-      `scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
-      `crop=${backgroundWidth}:${backgroundHeight}:(iw-ow)/2:(ih-oh)/2,` +
-      `gblur=sigma=18:steps=1,` +
-      `scale=${targetWidth}:${targetHeight}`;
-
-    filters = [
-      `[0:v]split=2[bgsrc][fgsrc]`,
-      `[bgsrc]${background}[bg]`,
-      `[fgsrc]${foreground},format=yuv420p[fg]`,
-      `[bg][fg]overlay=(W-w)/2:(H-h)/2,` +
-        `fade=t=in:st=0:d=0.4,` +
-        `ass='${escapedAss}':shaping=complex,` +
-        `format=yuv420p[v]`,
-    ];
+    /*
+     * Fill is the default.
+     *
+     * The foreground is always scaled until the complete target canvas
+     * is covered, then center-cropped to W x H. This cannot create black
+     * bars and cannot stretch/squish the source because the aspect ratio
+     * is preserved by force_original_aspect_ratio=increase.
+     */
+    filters.push(
+      "[0:v]setsar=1," +
+      "scale=" +
+      W +
+      ":" +
+      H +
+      ":force_original_aspect_ratio=increase," +
+      "crop=" +
+      W +
+      ":" +
+      H +
+      ":(iw-ow)/2:(ih-oh)/2," +
+      "setsar=1," +
+      "fade=t=in:st=0:d=0.4," +
+      captionFilter +
+      ",setsar=1,format=yuv420p[v]"
+    );
   } else {
-    // "Fit frame": complete video with black letterbox/pillarbox.
-    const videoChain =
-      `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
-      `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black`;
+    /*
+     * Explicit FIT mode:
+     * - Background is low-resolution and blurred.
+     * - Foreground preserves its aspect ratio.
+     * - Both are derived from FFmpeg's actual decoded frame geometry.
+     *
+     * The normalized input is already capped at 1280 long-side, so
+     * split=2 is kept at a safe memory size on Render Free.
+     */
+    const bgW =
+      Math.max(
+        2,
+        Math.floor(W / 4 / 2) * 2
+      );
 
-    filters = [
-      `[0:v]${videoChain},` +
-        `fade=t=in:st=0:d=0.4,` +
-        `ass='${escapedAss}':shaping=complex,` +
-        `format=yuv420p[v]`,
-    ];
+    const bgH =
+      Math.max(
+        2,
+        Math.floor(H / 4 / 2) * 2
+      );
+
+    filters.push(
+      "[0:v]setsar=1,split=2[bgsrc][fgsrc]"
+    );
+
+    filters.push(
+      "[bgsrc]" +
+      "scale=" +
+      bgW +
+      ":" +
+      bgH +
+      ":force_original_aspect_ratio=increase," +
+      "crop=" +
+      bgW +
+      ":" +
+      bgH +
+      ":(iw-ow)/2:(ih-oh)/2," +
+      "gblur=sigma=8," +
+      "scale=" +
+      W +
+      ":" +
+      H +
+      "[bg]"
+    );
+
+    filters.push(
+      "[fgsrc]" +
+      "scale=" +
+      W +
+      ":" +
+      H +
+      ":force_original_aspect_ratio=decrease:" +
+      "force_divisible_by=2," +
+      "setsar=1," +
+      "format=yuv420p[fg]"
+    );
+
+    filters.push(
+      "[bg][fg]overlay=" +
+      "(W-w)/2:(H-h)/2," +
+      "fade=t=in:st=0:d=0.4," +
+      captionFilter +
+      ",setsar=1,format=yuv420p[v]"
+    );
   }
 
-  // Audio
   if (hasBgm) {
-    const fadeOutStart = Math.max(
-      0,
-      Number(clipDuration) - 1.5
-    ).toFixed(2);
+    const fadeOutStart =
+      Math.max(
+        0,
+        Number(clipDuration) - 1.5
+      ).toFixed(2);
 
     const bgmBase =
-      `[1:a]` +
-      `volume=${BGM_VOLUME},` +
-      `afade=t=in:st=0:d=1,` +
-      `afade=t=out:st=${fadeOutStart}:d=1.5`;
+      "[1:a]" +
+      "volume=" +
+      BGM_VOLUME +
+      "," +
+      "afade=t=in:st=0:d=1," +
+      "afade=t=out:st=" +
+      fadeOutStart +
+      ":d=1.5";
 
-    if (info.hasAudio) {
+    if (info && info.hasAudio) {
       filters.push(
         "[0:a]asplit=2[voice][sc]"
       );
 
       filters.push(
-        `${bgmBase}[bgm0]`
+        bgmBase +
+        "[bgm0]"
       );
 
       filters.push(
-        `[bgm0][sc]` +
-          `sidechaincompress=` +
-          `threshold=${DUCK_THRESHOLD}:` +
-          `ratio=${DUCK_RATIO}:` +
-          `attack=30:` +
-          `release=500` +
-          `[bgmd]`
+        "[bgm0][sc]" +
+        "sidechaincompress=" +
+        "threshold=" +
+        DUCK_THRESHOLD +
+        ":ratio=" +
+        DUCK_RATIO +
+        ":attack=30:release=500" +
+        "[bgmd]"
       );
 
       filters.push(
         "[voice][bgmd]" +
-          "amix=inputs=2:" +
-          "duration=first:" +
-          "dropout_transition=0:" +
-          "normalize=0," +
-          "alimiter=limit=0.9" +
-          "[a]"
+        "amix=inputs=2:" +
+        "duration=first:" +
+        "dropout_transition=0:" +
+        "normalize=0," +
+        "alimiter=limit=0.9" +
+        "[a]"
       );
     } else {
       filters.push(
-        `${bgmBase},` +
-          `atrim=duration=${Number(
-            clipDuration
-          ).toFixed(2)}` +
-          `[a]`
+        bgmBase +
+        ",atrim=duration=" +
+        Number(clipDuration).toFixed(2) +
+        "[a]"
       );
     }
   }
@@ -516,9 +546,193 @@ function buildFilterGraph(
 }
 
 // ------------------------------------------------------------
-// Edited clip
+// Render verification
 // ------------------------------------------------------------
 
+async function detectActiveCrop(
+  outputPath,
+  middleTime
+) {
+  return new Promise((resolve) => {
+    const stderrLines = [];
+
+    const command =
+      ffmpeg(outputPath)
+        .inputOptions([
+          "-ss",
+          Math.max(
+            0,
+            Number(middleTime) || 0
+          ).toFixed(3),
+        ])
+        .outputOptions([
+          "-frames:v",
+          "1",
+          "-an",
+          "-f",
+          "null",
+        ])
+        .videoFilters(
+          "cropdetect=limit=24:round=2:reset=0"
+        )
+        .on("stderr", (line) => {
+          stderrLines.push(
+            String(line)
+          );
+        })
+        .on("end", () => {
+          let latest = null;
+
+          for (const line of stderrLines) {
+            const match =
+              line.match(
+                /crop=(\d+):(\d+):(\d+):(\d+)/
+              );
+
+            if (match) {
+              latest = {
+                width: Number(match[1]),
+                height: Number(match[2]),
+                x: Number(match[3]),
+                y: Number(match[4]),
+              };
+            }
+          }
+
+          resolve(latest);
+        })
+        .on("error", (error) => {
+          console.warn(
+            "[verify] cropdetect failed:",
+            error && error.message
+              ? error.message
+              : error
+          );
+
+          resolve(null);
+        });
+
+    command.output(
+      process.platform === "win32"
+        ? "NUL"
+        : "/dev/null"
+    );
+
+    command.run();
+  });
+}
+
+async function verifyRenderedClip(
+  outputPath,
+  framing,
+  clipDuration
+) {
+  const info =
+    await getVideoInfo(
+      outputPath
+    );
+
+  const expectedSar =
+    "1:1";
+
+  const dimensionsOk =
+    info.width === VIDEO_WIDTH &&
+    info.height === VIDEO_HEIGHT;
+
+  const sarOk =
+    info.sampleAspectRatio === expectedSar;
+
+  console.log(
+    "[verify] output=" +
+    info.width +
+    "x" +
+    info.height +
+    " sar=" +
+    info.sampleAspectRatio +
+    " rotation=" +
+    info.rotation
+  );
+
+  if (!dimensionsOk || !sarOk) {
+    throw new Error(
+      "Rendered output verification failed: expected " +
+      VIDEO_WIDTH +
+      "x" +
+      VIDEO_HEIGHT +
+      " SAR 1:1, got " +
+      info.width +
+      "x" +
+      info.height +
+      " SAR " +
+      info.sampleAspectRatio
+    );
+  }
+
+  if (framing === "fill") {
+    const middleTime =
+      Math.max(
+        0,
+        Math.min(
+          Math.max(
+            0,
+            Number(clipDuration) / 2
+          ),
+          Math.max(
+            0,
+            Number(clipDuration) - 0.1
+          )
+        )
+      );
+
+    const crop =
+      await detectActiveCrop(
+        outputPath,
+        middleTime
+      );
+
+    if (crop) {
+      const minimumActiveHeight =
+        VIDEO_HEIGHT * 0.9;
+
+      if (
+        crop.height <
+        minimumActiveHeight
+      ) {
+        console.warn(
+          "[verify] WARNING active video area only " +
+          crop.height +
+          " of " +
+          VIDEO_HEIGHT
+        );
+      } else {
+        console.log(
+          "[verify] active video area " +
+          crop.height +
+          " of " +
+          VIDEO_HEIGHT +
+          " OK"
+        );
+      }
+    } else {
+      console.warn(
+        "[verify] WARNING cropdetect returned no active area"
+      );
+    }
+  }
+
+  console.log(
+    "[verify] OK " +
+    VIDEO_WIDTH +
+    "x" +
+    VIDEO_HEIGHT +
+    " SAR 1:1"
+  );
+
+  return info;
+}
+
+// ------------------------------------------------------------
+// Edited clip
 // ------------------------------------------------------------
 
 async function buildEditedClip(
@@ -532,388 +746,240 @@ async function buildEditedClip(
   sourceInfo
 ) {
   const mode =
-    framing === "fill"
-      ? "fill"
-      : "fit";
-
-  // PHASE 4: reuse the video metadata already probed by server.js.
-  // This removes one ffprobe process per clip without changing rendering.
-  const originalInfo =
-    sourceInfo || await getVideoInfo(rawClipPath);
-
-  const is4KOrLarger =
-    originalInfo.width >= 3840 ||
-    originalInfo.height >= 3840;
-
-  const targetWidth =
-    is4KOrLarger ? 720 : VIDEO_WIDTH;
-
-  const targetHeight =
-    is4KOrLarger ? 1280 : VIDEO_HEIGHT;
-
-  const targetLabel =
-    is4KOrLarger
-      ? "720x1280"
-      : "1080x1920";
-
-  // SAFE FAST PATH:
-  // If the clip is already exactly the final 9:16 render size, do not
-  // scale, split, blur, crop, or overlay it again. The visible result is
-  // identical because the foreground already fills the complete canvas.
-  const contentCrop = originalInfo.contentCrop || null;
-
-  const isAlreadyTargetPortrait =
-    !contentCrop &&
-    originalInfo.sampleAspectRatio === "1:1" &&
-    !originalInfo.applyRotation &&
-    originalInfo.width === targetWidth &&
-    originalInfo.height === targetHeight;
-
-  console.log(
-    `[buildEditedClip] source=${originalInfo.width}x${originalInfo.height} ` +
-      `target=${targetLabel} ` +
-      `framing=${mode} ` +
-      `bgm=${bgmPath ? "yes" : "no"} ` +
-      `duration=${Number(clipDuration).toFixed(1)}s`
-  );
-
-  console.log(
-    "[buildEditedClip] ASS:",
-    assPath
-  );
+    framing === "fit"
+      ? "fit"
+      : "fill";
 
   /*
-   * Render free-tier protection:
-   *
-   * A 4K frame is very expensive in FFmpeg. The previous Fill Blurred
-   * graph used split=2 on the 4K input, which meant FFmpeg could hold
-   * multiple large frame buffers at once. Render's free instance has
-   * a hard ~512 MB memory limit, so the process could be killed while
-   * the UI was around 75%.
-   *
-   * For 4K-or-larger uploads we now do a separate LOW-MEMORY preparation
-   * pass first. The final caption/BGM pass only works with the small
-   * 720-wide source. This removes the 4K frame from the caption filter
-   * graph entirely and avoids split=2 on a 4K stream.
-   *
-   * IMPORTANT:
-   * - Aspect ratio is preserved.
-   * - Fill Blurred still shows the complete video in the foreground.
-   * - The blurred background is generated from the same prepared video.
-   * - The 4K source is intentionally rendered to 720x1280 on the free
-   *   worker because a true 4K final render cannot reliably fit in the
-   *   worker's ~512 MB memory ceiling.
+   * sourceInfo is used only for the audio-stream decision.
+   * No source width/height is used to calculate the video geometry.
    */
-  // PHASE 7: render anamorphic/rotated clips in ONE FFmpeg pass.
-  // The previous implementation encoded a normalized intermediate first,
-  // then encoded captions/BGM again. Geometry correction now happens in
-  // the final filter graph, eliminating that extra full encode.
-  const preparedPath = null;
-  const backgroundPath = null;
+  const originalInfo =
+    sourceInfo ||
+    await getVideoInfo(
+      rawClipPath
+    );
 
-  const cleanupTemp = () => {};
+  console.log(
+    "[buildEditedClip] target=" +
+    VIDEO_WIDTH +
+    "x" +
+    VIDEO_HEIGHT +
+    " source=" +
+    rawClipPath +
+    " framing=" +
+    mode +
+    " bgm=" +
+    (bgmPath ? "yes" : "no")
+  );
 
-  try {
-    const renderInput =
-      preparedPath || rawClipPath;
+  const escapedAss =
+    escapePathForFilter(
+      assPath
+    );
 
-    const filters = [];
-    const rotationFilter = originalInfo.applyRotation
-      ? (Number(originalInfo.rotation) < 0 ? "transpose=2," : "transpose=1,")
-      : "";
+  const filters =
+    buildFilterGraph(
+      {
+        hasAudio:
+          Boolean(
+            originalInfo &&
+            originalInfo.hasAudio
+          ),
+      },
+      mode,
+      escapedAss,
+      Boolean(bgmPath),
+      clipDuration
+    );
 
-    const contentCropFilter = contentCrop
-      ? "crop=" + contentCrop.width + ":" + contentCrop.height + ":" + contentCrop.x + ":" + contentCrop.y + ",setsar=1,"
-      : "";
+  console.log(
+    "[buildEditedClip] FINAL FILTER GRAPH:"
+  );
 
-    if (mode === "fill") {
-      if (isAlreadyTargetPortrait) {
-        // A full-frame 9:16 clip completely covers its own blurred
-        // background. Skipping that hidden work does not change pixels.
-        filters.push(
-          "[0:v]," +
-          "fade=t=in:st=0:d=0.4," +
-          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
-          "format=yuv420p[v]"
-        );
-      } else if (backgroundPath) {
-        const foreground =
-          `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`;
+  console.log(
+    filters.join(";")
+  );
 
-        filters.push(
-          `[1:v]scale=${targetWidth}:${targetHeight}[bg]`
-        );
-
-        filters.push(
-          `[0:v]${foreground},format=yuv420p[fg]`
-        );
-
-        filters.push(
-          "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
-          "fade=t=in:st=0:d=0.4," +
-          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
-          "format=yuv420p[v]"
-        );
-      } else {
-        filters.push(
-          `[0:v]split=2[bgsrc][fgsrc]`
-        );
-
-        const backgroundWidth =
-          Math.max(
-            180,
-            Math.floor(targetWidth / 3 / 2) * 2
-          );
-
-        const backgroundHeight =
-          Math.max(
-            320,
-            Math.floor(targetHeight / 3 / 2) * 2
-          );
-
-        filters.push(
-          `[bgsrc]${rotationFilter}${contentCropFilter}scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
-          `crop=${backgroundWidth}:${backgroundHeight},` +
-          "gblur=sigma=18:steps=1," +
-          `scale=${targetWidth}:${targetHeight}[bg]`
-        );
-
-        filters.push(
-          `[fgsrc]${rotationFilter}${contentCropFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,` +
-          `crop=${targetWidth}:${targetHeight}:(iw-ow)/2:(ih-oh)/2,setsar=1,format=yuv420p[fg]`
-        );
-
-        filters.push(
-          "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
-          "fade=t=in:st=0:d=0.4," +
-          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
-          "format=yuv420p[v]"
-        );
-      }
-    } else {
-      if (isAlreadyTargetPortrait) {
-        // Already the exact target canvas: skip redundant scale/pad work.
-        filters.push(
-          "[0:v]," +
-          "fade=t=in:st=0:d=0.4," +
-          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
-          "format=yuv420p[v]"
-        );
-      } else {
-        const videoChain =
-          `${rotationFilter}${contentCropFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
-          `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
-
-        filters.push(
-          `[0:v]${videoChain},` +
-          "fade=t=in:st=0:d=0.4," +
-          `ass='${escapePathForFilter(assPath)}':shaping=complex,` +
-          "format=yuv420p[v]"
-        );
-      }
-    }
-
-    if (bgmPath) {
-      const fadeOutStart =
-        Math.max(
-          0,
-          Number(clipDuration) - 1.5
-        ).toFixed(2);
-
-      const bgmBase =
-        "[1:a]" +
-        `volume=${BGM_VOLUME},` +
-        "afade=t=in:st=0:d=1," +
-        `afade=t=out:st=${fadeOutStart}:d=1.5`;
-
-      if (originalInfo.hasAudio) {
-        filters.push(
-          "[0:a]asplit=2[voice][sc]"
-        );
-
-        filters.push(
-          `${bgmBase}[bgm0]`
-        );
-
-        filters.push(
-          `[bgm0][sc]sidechaincompress=` +
-          `threshold=${DUCK_THRESHOLD}:` +
-          `ratio=${DUCK_RATIO}:` +
-          "attack=30:" +
-          "release=500[bgmd]"
-        );
-
-        filters.push(
-          "[voice][bgmd]amix=inputs=2:" +
-          "duration=first:" +
-          "dropout_transition=0:" +
-          "normalize=0," +
-          "alimiter=limit=0.9[a]"
-        );
-      } else {
-        filters.push(
-          `${bgmBase},atrim=duration=${Number(clipDuration).toFixed(2)}[a]`
-        );
-      }
-    }
-
-    return await new Promise((resolve, reject) => {
+  return new Promise(
+    (resolve, reject) => {
       const command =
-        ffmpeg(renderInput)
-          .inputOptions(["-noautorotate"]);
+        ffmpeg(rawClipPath);
 
-    if (bgmPath) {
-      command.input(bgmPath);
-    }
+      if (bgmPath) {
+        command.input(
+          bgmPath
+        );
+      }
 
-    /*
-     * When a 4K background exists:
-     *   input 0 = prepared low-res source
-     *   input 1 = low-res blurred background
-     *   BGM      = input 2
-     *
-     * The audio graph therefore needs the correct BGM input index.
-     */
-    // No separate background input is used anymore. BGM remains input 1.
-
-    // PHASE 3 SAFE FAST PATH:
-    // When no BGM is requested and the video graph is a single input/output
-    // chain, use FFmpeg's simple video filter path instead of a complex graph.
-    // Captions, timing, framing and output pixels remain the same; this only
-    // removes unnecessary filter-graph orchestration for the common path.
-    const canUseSimpleVideoFilter =
-      !bgmPath &&
-      (mode === "fit" || isAlreadyTargetPortrait);
-
-    if (canUseSimpleVideoFilter) {
-      const simpleVideoFilter =
-        filters[0].slice(5, -3);
+      const maps =
+        bgmPath
+          ? [
+              "-map",
+              "[v]",
+              "-map",
+              "[a]",
+            ]
+          : [
+              "-map",
+              "[v]",
+              "-map",
+              "0:a?",
+            ];
 
       command
-        .videoFilters(simpleVideoFilter)
-        .outputOptions([
-          "-map", "0:v:0",
-          "-map", "0:a?",
-          "-threads", "1",
-          "-filter_threads", "1",
-        ]);
-    } else {
-      const maps = bgmPath
-        ? [
-            "-map", "[v]",
-            "-map", "[a]",
+        .complexFilter(
+          filters
+        )
+        .outputOptions(
+          [
+            ...maps,
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-filter_complex_threads",
+            "1",
+            "-preset",
+            "ultrafast",
+            "-x264-params",
+            "rc-lookahead=0:ref=1:bframes=0",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-b:a",
+            "128k",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+            "-avoid_negative_ts",
+            "make_zero",
           ]
-        : [
-            "-map", "[v]",
-            "-map", "0:a?",
-          ];
+        )
+        .videoCodec("libx264")
+        .audioCodec("aac")
+        .on("start", (commandLine) => {
+          console.log(
+            "[buildEditedClip] FFmpeg command:"
+          );
+          console.log(
+            commandLine
+          );
+          onProgress?.(0);
+        })
+        .on("progress", (progress) => {
+          const percent =
+            Number(
+              progress &&
+              progress.percent
+            );
 
-      command
-        .complexFilter(filters)
-        .outputOptions([
-          "-threads", "1",
-          "-filter_threads", "1",
-          "-filter_complex_threads", "1",
-        ])
-        .outputOptions(maps);
+          if (
+            Number.isFinite(
+              percent
+            )
+          ) {
+            onProgress?.(
+              Math.max(
+                0,
+                Math.min(
+                  100,
+                  percent
+                )
+              )
+            );
+          }
+        })
+        .on("stderr", (line) => {
+          const text =
+            String(line);
+
+          if (
+            /Error|Invalid|failed|Killed|Conversion failed/i.test(
+              text
+            )
+          ) {
+            console.error(
+              "[buildEditedClip] " +
+              text
+            );
+          }
+        })
+        .on("end", async () => {
+          try {
+            if (
+              !fs.existsSync(
+                outputPath
+              )
+            ) {
+              throw new Error(
+                "FFmpeg finished but edited clip was not created"
+              );
+            }
+
+            const size =
+              fs.statSync(
+                outputPath
+              ).size;
+
+            if (!size) {
+              throw new Error(
+                "FFmpeg created an empty edited clip"
+              );
+            }
+
+            await verifyRenderedClip(
+              outputPath,
+              mode,
+              clipDuration
+            );
+
+            console.log(
+              "[buildEditedClip] Created: " +
+              outputPath +
+              " (" +
+              size +
+              " bytes)"
+            );
+
+            onProgress?.(100);
+
+            resolve(
+              outputPath
+            );
+          } catch (error) {
+            reject(error);
+          }
+        })
+        .on(
+          "error",
+          (err, stdout, stderr) => {
+            console.error(
+              "[buildEditedClip] FFmpeg ERROR:",
+              err &&
+              err.message
+                ? err.message
+                : err
+            );
+
+            if (stderr) {
+              console.error(
+                "[buildEditedClip] FFmpeg STDERR:"
+              );
+              console.error(
+                stderr
+              );
+            }
+
+            reject(err);
+          }
+        )
+        .save(
+          outputPath
+        );
     }
-
-      command
-      .videoCodec("libx264")
-      .audioCodec("aac")
-      .outputOptions([
-        "-threads", "1",
-        "-preset", "ultrafast",
-        "-tune", "zerolatency",
-        "-x264-params",
-        "rc-lookahead=0:ref=1:bframes=0",
-        "-crf",
-        is4KOrLarger ? "26" : "23",
-        "-pix_fmt", "yuv420p",
-        "-b:a", "128k",
-        "-shortest",
-        "-movflags", "+faststart",
-        "-avoid_negative_ts", "make_zero",
-      ])
-      .on("start", (commandLine) => {
-        console.log(
-          "[buildEditedClip] FFmpeg command:"
-        );
-        console.log(commandLine);
-        onProgress?.(0);
-      })
-      .on("progress", (progress) => {
-        const percent =
-          Number(progress?.percent);
-
-        if (Number.isFinite(percent)) {
-          onProgress?.(
-            Math.max(
-              0,
-              Math.min(100, percent)
-            )
-          );
-        }
-      })
-      .on("stderr", (line) => {
-        if (
-          line.includes("Error") ||
-          line.includes("error") ||
-          line.includes("Invalid") ||
-          line.includes("failed") ||
-          line.includes("Killed")
-        ) {
-          console.error(
-            `[buildEditedClip] ${line}`
-          );
-        }
-      })
-      .on("end", () => {
-        if (
-          !fs.existsSync(outputPath) ||
-          fs.statSync(outputPath).size <= 0
-        ) {
-          cleanupTemp();
-
-          return reject(
-            new Error(
-              "FFmpeg finished but edited clip was not created"
-            )
-          );
-        }
-
-        const size =
-          fs.statSync(outputPath).size;
-
-        console.log(
-          `[buildEditedClip] Created: ${outputPath} (${size} bytes)`
-        );
-
-        cleanupTemp();
-        resolve(outputPath);
-      })
-      .on("error", (err, stdout, stderr) => {
-        console.error(
-          "[buildEditedClip] FFmpeg ERROR:",
-          err?.message || err
-        );
-
-        if (stderr) {
-          console.error(
-            "[buildEditedClip] FFmpeg STDERR:"
-          );
-          console.error(stderr);
-        }
-
-        cleanupTemp();
-        reject(err);
-      })
-      .save(outputPath);
-    });
-  } catch (error) {
-    cleanupTemp();
-    throw error;
-  }
+  );
 }
 
 // ------------------------------------------------------------
@@ -921,11 +987,13 @@ async function buildEditedClip(
 // ------------------------------------------------------------
 
 module.exports = {
+  VIDEO_WIDTH,
+  VIDEO_HEIGHT,
   getVideoDuration,
   getVideoInfo,
   normalizeClipForRender,
   cutRawClip,
   buildEditedClip,
   buildFilterGraph,
-  detectContentCrop,
+  verifyRenderedClip,
 };
