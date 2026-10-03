@@ -129,16 +129,91 @@ async function detectContentCrop(sourcePath, info) {
         const counts = new Map();
         for (const c of candidates) { const key = c.width+":"+c.height+":"+c.x+":"+c.y; counts.set(key,(counts.get(key)||0)+1); }
         candidates.sort((a,b) => { const ak=a.width+":"+a.height+":"+a.x+":"+a.y; const bk=b.width+":"+b.height+":"+b.x+":"+b.y; return (counts.get(bk)||0)-(counts.get(ak)||0); });
-        const crop=candidates[0];
-        const fullArea=Number(info.width)*Number(info.height);
-        const areaRatio=fullArea>0?(crop.width*crop.height)/fullArea:1;
-        const verticalTrim=Number(info.height)-crop.height;
-        const horizontalTrim=Number(info.width)-crop.width;
-        const significantVerticalTrim = verticalTrim >= Number(info.height) * 0.12;
-        const significantHorizontalTrim = horizontalTrim >= Number(info.width) * 0.12;
-        if (!significantVerticalTrim && !significantHorizontalTrim) return resolve(null);
-        if (crop.width<240 || crop.height<240 || crop.x<0 || crop.y<0 || crop.x+crop.width>Number(info.width) || crop.y+crop.height>Number(info.height)) return resolve(null);
-        console.log("[detectContentCrop] Embedded/letterboxed content detected:", crop);
+        const crop = candidates[0];
+
+        if (
+          crop.width < 240 ||
+          crop.height < 240 ||
+          crop.x < 0 ||
+          crop.y < 0 ||
+          crop.x + crop.width > Number(info.width) ||
+          crop.y + crop.height > Number(info.height)
+        ) {
+          return resolve(null);
+        }
+
+        /*
+         * Browser-trimmed landscape clips can already be inside a 1080x1920
+         * canvas. cropdetect can include the black area below the real 16:9
+         * picture when captions/text exist there.
+         *
+         * Example from the user's failing clip:
+         *   detected: 1080x1056 at y=656
+         *   real picture: 1080x608 at y=656
+         *
+         * When the detected region spans the full width and is clearly
+         * landscape, recover the actual 16:9 picture height instead of
+         * scaling the black lower area into the final video.
+         */
+        const fullWidth =
+          crop.width >= Number(info.width) * 0.98;
+
+        const detectedLandscape =
+          crop.width / Math.max(1, crop.height) >= 1.30;
+
+        if (fullWidth && detectedLandscape) {
+          const inferredHeight =
+            Math.round(
+              (crop.width * 9) / 16 / 2
+            ) * 2;
+
+          if (
+            inferredHeight >= 240 &&
+            inferredHeight <= crop.height
+          ) {
+            const inferredCrop = {
+              width: crop.width,
+              height: inferredHeight,
+              x: crop.x,
+              y: crop.y,
+            };
+
+            console.log(
+              "[detectContentCrop] Recovered embedded 16:9 picture:",
+              inferredCrop
+            );
+
+            return resolve(inferredCrop);
+          }
+        }
+
+        const fullArea =
+          Number(info.width) * Number(info.height);
+
+        const areaRatio =
+          fullArea > 0
+            ? (crop.width * crop.height) / fullArea
+            : 1;
+
+        const verticalTrim =
+          Number(info.height) - crop.height;
+
+        const horizontalTrim =
+          Number(info.width) - crop.width;
+
+        if (
+          areaRatio >= 0.88 &&
+          verticalTrim < Number(info.height) * 0.08 &&
+          horizontalTrim < Number(info.width) * 0.08
+        ) {
+          return resolve(null);
+        }
+
+        console.log(
+          "[detectContentCrop] Embedded/letterboxed content detected:",
+          crop
+        );
+
         resolve(crop);
       })
       .on("error", (err) => { console.warn("[detectContentCrop] cropdetect failed; using full frame:", err?.message || err); resolve(null); });
