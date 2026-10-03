@@ -100,7 +100,7 @@ function maskProfanity(word) {
   return match[1] + prefix + "*" + suffix + match[3];
 }
 
-function buildAssHeader(fontName) {
+function buildAssHeader(fontName, width = VIDEO_WIDTH, height = VIDEO_HEIGHT) {
   const whiteColor = "&H00FFFFFF";
   const outlineColor = "&H00000000";
 
@@ -108,7 +108,7 @@ function buildAssHeader(fontName) {
     Math.max(
       1,
       Math.round(
-        VIDEO_HEIGHT * 0.033
+        height * 0.033
       )
     );
 
@@ -116,7 +116,7 @@ function buildAssHeader(fontName) {
     Math.max(
       1,
       Math.round(
-        VIDEO_HEIGHT * 0.15
+        height * 0.15
       )
     );
 
@@ -124,7 +124,7 @@ function buildAssHeader(fontName) {
     Math.max(
       1,
       Math.round(
-        VIDEO_WIDTH * 0.07
+        width * 0.07
       )
     );
 
@@ -132,7 +132,7 @@ function buildAssHeader(fontName) {
     Math.max(
       1,
       Math.round(
-        VIDEO_HEIGHT * 0.0045
+        height * 0.0045
       )
     );
 
@@ -140,7 +140,7 @@ function buildAssHeader(fontName) {
     Math.max(
       0,
       Math.round(
-        VIDEO_HEIGHT * 0.002
+        height * 0.002
       )
     );
 
@@ -149,8 +149,8 @@ Title: Captify Captions
 ScriptType: v4.00+
 WrapStyle: 0
 ScaledBorderAndShadow: yes
-PlayResX: ${VIDEO_WIDTH}
-PlayResY: ${VIDEO_HEIGHT}
+PlayResX: ${width}
+PlayResY: ${height}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -269,23 +269,7 @@ function buildAssCaptions(words, clipStartTime, clipEndTime, highlightColorHex, 
   const fontName = hasDevanagari ? FONT_DEVANAGARI : FONT_LATIN;
 
 const lines = groupIntoLines(clipWords);
-  const previousWidth = VIDEO_WIDTH;
-  const previousHeight = VIDEO_HEIGHT;
-  void previousWidth;
-  void previousHeight;
-
-  // ASS geometry is derived from the same output constants used by FFmpeg.
-  // The function arguments are accepted for compatibility with the worker.
-  const assWidth = targetWidth;
-  const assHeight = targetHeight;
-  const originalHeaderWidth = VIDEO_WIDTH;
-  const originalHeaderHeight = VIDEO_HEIGHT;
-  void assWidth;
-  void assHeight;
-  void originalHeaderWidth;
-  void originalHeaderHeight;
-
-  let assContent = buildAssHeader(fontName);
+  let assContent = buildAssHeader(fontName, targetWidth, targetHeight);
 
 for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
