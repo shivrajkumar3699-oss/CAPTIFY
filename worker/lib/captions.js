@@ -100,7 +100,7 @@ function maskProfanity(word) {
   return match[1] + prefix + "*" + suffix + match[3];
 }
 
-function buildAssHeader(fontName, marginV = 190) {
+function buildAssHeader(fontName, marginV = 480) {
   const whiteColor = "&H00FFFFFF";
   const outlineColor = "&H00000000";
   return `[Script Info]
