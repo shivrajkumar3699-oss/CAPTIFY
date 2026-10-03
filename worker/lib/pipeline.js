@@ -134,7 +134,9 @@ async function detectContentCrop(sourcePath, info) {
         const areaRatio=fullArea>0?(crop.width*crop.height)/fullArea:1;
         const verticalTrim=Number(info.height)-crop.height;
         const horizontalTrim=Number(info.width)-crop.width;
-        if (areaRatio>=0.88 && verticalTrim<Number(info.height)*0.08 && horizontalTrim<Number(info.width)*0.08) return resolve(null);
+        const significantVerticalTrim = verticalTrim >= Number(info.height) * 0.12;
+        const significantHorizontalTrim = horizontalTrim >= Number(info.width) * 0.12;
+        if (!significantVerticalTrim && !significantHorizontalTrim) return resolve(null);
         if (crop.width<240 || crop.height<240 || crop.x<0 || crop.y<0 || crop.x+crop.width>Number(info.width) || crop.y+crop.height>Number(info.height)) return resolve(null);
         console.log("[detectContentCrop] Embedded/letterboxed content detected:", crop);
         resolve(crop);
