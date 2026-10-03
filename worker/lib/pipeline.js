@@ -356,7 +356,7 @@ function buildFilterGraph(
 
     const background =
       `scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
-      `crop=${backgroundWidth}:${backgroundHeight},` +
+      `crop=${backgroundWidth}:${backgroundHeight}:(iw-ow)/2:(ih-oh)/2,` +
       `gblur=sigma=18:steps=1,` +
       `scale=${targetWidth}:${targetHeight}`;
 
@@ -603,7 +603,7 @@ async function buildEditedClip(
 
         filters.push(
           `[fgsrc]${rotationFilter}${contentCropFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,` +
-          `crop=${targetWidth}:${targetHeight},setsar=1,format=yuv420p[fg]`
+          `crop=${targetWidth}:${targetHeight}:(iw-ow)/2:(ih-oh)/2,setsar=1,format=yuv420p[fg]`
         );
 
         filters.push(
