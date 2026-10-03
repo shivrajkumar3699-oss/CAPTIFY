@@ -1,12 +1,12 @@
 // worker/lib/captions.js
 const fs = require("fs");
 
-const VIDEO_WIDTH = 1080;
-const VIDEO_HEIGHT = 1920;
+const VIDEO_WIDTH = Number(process.env.OUT_W) || 1080;
+const VIDEO_HEIGHT = Number(process.env.OUT_H) || 1920;
 
 // ---- Caption layout settings (easy to tweak) ----
 const MAX_WORDS_PER_LINE = 4;
-const MAX_CHARS_PER_LINE = 26; // start a new line before it gets too wide
+const MAX_CHARS_PER_LINE = 22; // start a new line before it gets too wide
 const PAUSE_BREAK_SECONDS = 0.6; // a pause this long starts a new line
 const HOLD_AFTER_LAST_WORD = 0.25; // keep the last word on screen a moment longer
 
@@ -100,9 +100,50 @@ function maskProfanity(word) {
   return match[1] + prefix + "*" + suffix + match[3];
 }
 
-function buildAssHeader(fontName, marginV = 480) {
+function buildAssHeader(fontName) {
   const whiteColor = "&H00FFFFFF";
   const outlineColor = "&H00000000";
+
+  const fontSize =
+    Math.max(
+      1,
+      Math.round(
+        VIDEO_HEIGHT * 0.033
+      )
+    );
+
+  const marginV =
+    Math.max(
+      1,
+      Math.round(
+        VIDEO_HEIGHT * 0.15
+      )
+    );
+
+  const marginL =
+    Math.max(
+      1,
+      Math.round(
+        VIDEO_WIDTH * 0.07
+      )
+    );
+
+  const outline =
+    Math.max(
+      1,
+      Math.round(
+        VIDEO_HEIGHT * 0.0045
+      )
+    );
+
+  const shadow =
+    Math.max(
+      0,
+      Math.round(
+        VIDEO_HEIGHT * 0.002
+      )
+    );
+
   return `[Script Info]
 Title: Captify Captions
 ScriptType: v4.00+
@@ -113,7 +154,7 @@ PlayResY: ${VIDEO_HEIGHT}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},90,${whiteColor},${whiteColor},${outlineColor},&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,60,60,${marginV},1
+Style: Default,${fontName},${fontSize},${whiteColor},${whiteColor},${outlineColor},&H00000000,-1,0,0,0,100,100,0,0,1,${outline},${shadow},2,${marginL},${marginL},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -209,7 +250,9 @@ for (const w of words) {
  * @param {string} outputPath - where to write the .ass file
  * @returns {string} outputPath
  */
-function buildAssCaptions(words, clipStartTime, clipEndTime, highlightColorHex, outputPath, sourceWidth = VIDEO_WIDTH, sourceHeight = VIDEO_HEIGHT) {
+function buildAssCaptions(words, clipStartTime, clipEndTime, highlightColorHex, outputPath, outputWidth = VIDEO_WIDTH, outputHeight = VIDEO_HEIGHT) {
+  const targetWidth = Number(outputWidth) || VIDEO_WIDTH;
+  const targetHeight = Number(outputHeight) || VIDEO_HEIGHT;
   const highlightTag = `&H${hexToBgrHex(highlightColorHex)}&`;
   const whiteTag = `&HFFFFFF&`;
 
@@ -226,6 +269,22 @@ function buildAssCaptions(words, clipStartTime, clipEndTime, highlightColorHex, 
   const fontName = hasDevanagari ? FONT_DEVANAGARI : FONT_LATIN;
 
 const lines = groupIntoLines(clipWords);
+  const previousWidth = VIDEO_WIDTH;
+  const previousHeight = VIDEO_HEIGHT;
+  void previousWidth;
+  void previousHeight;
+
+  // ASS geometry is derived from the same output constants used by FFmpeg.
+  // The function arguments are accepted for compatibility with the worker.
+  const assWidth = targetWidth;
+  const assHeight = targetHeight;
+  const originalHeaderWidth = VIDEO_WIDTH;
+  const originalHeaderHeight = VIDEO_HEIGHT;
+  void assWidth;
+  void assHeight;
+  void originalHeaderWidth;
+  void originalHeaderHeight;
+
   let assContent = buildAssHeader(fontName);
 
 for (let li = 0; li < lines.length; li++) {
