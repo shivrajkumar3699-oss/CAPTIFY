@@ -105,6 +105,46 @@ function getVideoInfo(videoPath) {
   });
 }
 // ------------------------------------------------------------
+// Content-crop detection
+// ------------------------------------------------------------
+
+async function detectContentCrop(sourcePath, info) {
+  if (!info || info.sampleAspectRatio !== "1:1" || info.applyRotation || !Number.isFinite(info.width) || !Number.isFinite(info.height) || info.width < 240 || info.height < 240) return null;
+  const duration = await getVideoDuration(sourcePath);
+  const sampleDuration = Math.min(2, Math.max(0.5, duration));
+  const sampleStart = Math.max(0, Math.min(Math.max(0, duration - sampleDuration), duration * 0.5 - sampleDuration * 0.5));
+  return await new Promise((resolve) => {
+    const stderrLines = [];
+    const command = ffmpeg(sourcePath).setStartTime(sampleStart).setDuration(sampleDuration)
+      .videoFilters("cropdetect=limit=0.08:round=2:reset=0")
+      .outputOptions(["-an", "-f", "null"])
+      .on("stderr", (line) => stderrLines.push(String(line)))
+      .on("end", () => {
+        const candidates = [];
+        for (const line of stderrLines) {
+          const match = line.match(/crop=(\\d+):(\\d+):(\\d+):(\\d+)/);
+          if (match) candidates.push({ width:Number(match[1]), height:Number(match[2]), x:Number(match[3]), y:Number(match[4]) });
+        }
+        if (!candidates.length) return resolve(null);
+        const counts = new Map();
+        for (const c of candidates) { const key = c.width+":"+c.height+":"+c.x+":"+c.y; counts.set(key,(counts.get(key)||0)+1); }
+        candidates.sort((a,b) => { const ak=a.width+":"+a.height+":"+a.x+":"+a.y; const bk=b.width+":"+b.height+":"+b.x+":"+b.y; return (counts.get(bk)||0)-(counts.get(ak)||0); });
+        const crop=candidates[0];
+        const fullArea=Number(info.width)*Number(info.height);
+        const areaRatio=fullArea>0?(crop.width*crop.height)/fullArea:1;
+        const verticalTrim=Number(info.height)-crop.height;
+        const horizontalTrim=Number(info.width)-crop.width;
+        if (areaRatio>=0.88 && verticalTrim<Number(info.height)*0.08 && horizontalTrim<Number(info.width)*0.08) return resolve(null);
+        if (crop.width<240 || crop.height<240 || crop.x<0 || crop.y<0 || crop.x+crop.width>Number(info.width) || crop.y+crop.height>Number(info.height)) return resolve(null);
+        console.log("[detectContentCrop] Embedded/letterboxed content detected:", crop);
+        resolve(crop);
+      })
+      .on("error", (err) => { console.warn("[detectContentCrop] cropdetect failed; using full frame:", err?.message || err); resolve(null); });
+    command.output(process.platform === "win32" ? "NUL" : "/dev/null").run();
+  });
+}
+
+// ------------------------------------------------------------
 // Raw clip
 // ------------------------------------------------------------
 
@@ -443,7 +483,10 @@ async function buildEditedClip(
   // If the clip is already exactly the final 9:16 render size, do not
   // scale, split, blur, crop, or overlay it again. The visible result is
   // identical because the foreground already fills the complete canvas.
+  const contentCrop = originalInfo.contentCrop || null;
+
   const isAlreadyTargetPortrait =
+    !contentCrop &&
     originalInfo.sampleAspectRatio === "1:1" &&
     !originalInfo.applyRotation &&
     originalInfo.width === targetWidth &&
@@ -502,6 +545,10 @@ async function buildEditedClip(
       ? (Number(originalInfo.rotation) < 0 ? "transpose=2," : "transpose=1,")
       : "";
 
+    const contentCropFilter = contentCrop
+      ? "crop=" + contentCrop.width + ":" + contentCrop.height + ":" + contentCrop.x + ":" + contentCrop.y + ",setsar=1,"
+      : "";
+
     if (mode === "fill") {
       if (isAlreadyTargetPortrait) {
         // A full-frame 9:16 clip completely covers its own blurred
@@ -548,14 +595,15 @@ async function buildEditedClip(
           );
 
         filters.push(
-          `[bgsrc]${rotationFilter}scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
+          `[bgsrc]${rotationFilter}${contentCropFilter}scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
           `crop=${backgroundWidth}:${backgroundHeight},` +
           "gblur=sigma=18:steps=1," +
           `scale=${targetWidth}:${targetHeight}[bg]`
         );
 
         filters.push(
-          `[fgsrc]${rotationFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[fg]`
+          `[fgsrc]${rotationFilter}${contentCropFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,` +
+          `crop=${targetWidth}:${targetHeight},setsar=1,format=yuv420p[fg]`
         );
 
         filters.push(
@@ -576,7 +624,7 @@ async function buildEditedClip(
         );
       } else {
         const videoChain =
-          `${rotationFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
+          `${rotationFilter}${contentCropFilter}scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,` +
           `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
 
         filters.push(
@@ -802,4 +850,5 @@ module.exports = {
   cutRawClip,
   buildEditedClip,
   buildFilterGraph,
+  detectContentCrop,
 };
