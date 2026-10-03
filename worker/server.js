@@ -1785,7 +1785,42 @@ async function runSmartRender(
         uploadedClipPath,
         0,
         clipDuration,
-        rawOutPath
+        rawOutPath,
+        (normalizeProgress) => {
+          const clipStartProgress =
+            50 +
+            (i / total) * 25;
+
+          const clipEndProgress =
+            50 +
+            (i / total) * 25 +
+            5;
+
+          const renderProgress =
+            Math.round(
+              clipStartProgress +
+              (Math.max(
+                0,
+                Math.min(
+                  100,
+                  Number(normalizeProgress) || 0
+                )
+              ) /
+                100) *
+                (clipEndProgress - clipStartProgress)
+            );
+
+          void reportStatus({
+            status: "rendering",
+            progress: renderProgress,
+            message:
+              "Normalizing clip " +
+              clipNum +
+              " of " +
+              total,
+            clips,
+          });
+        }
       );
 
       const normalizedClipInfo =
