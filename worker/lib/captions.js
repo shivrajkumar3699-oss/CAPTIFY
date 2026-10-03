@@ -55,6 +55,52 @@ function containsDevanagari(text) {
   return /[\u0900-\u097F]/.test(String(text));
 }
 
+// ------------------------------------------------------------
+// Profanity masking
+// ------------------------------------------------------------
+
+const PROFANITY_WORDS = new Set([
+  "fuck", "fucking", "fucked", "fucker", "fuckers", "fuckin", "motherfucker", "motherfuckers", "mf",
+  "shit", "shits", "shitty", "bullshit", "dick", "dicks", "dickhead", "dickheads",
+  "pussy", "pussies", "bitch", "bitches", "bitching", "cunt", "cunts", "cock", "cocks", "cocksucker",
+  "asshole", "assholes", "bastard", "bastards", "whore", "whores", "slut", "sluts",
+  "madarchod", "madarchods", "mc", "behenchod", "bhenchod", "bc", "chutiya", "chutiyas", "chut",
+  "gand", "gaand", "harami", "haramkhor", "kamina", "kamine", "randi", "lodu", "lauda", "lund",
+  "fuk", "fuking", "fuked", "fcker", "fck", "fcking", "sh1t", "b1tch", "d1ck", "p5sy", "a55hole"
+]);
+
+function normalizeProfanityToken(word) {
+  return String(word).toLowerCase().normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[0@]/g, (ch) => ch === "0" ? "o" : "a")
+    .replace(/1/g, "i").replace(/3/g, "e").replace(/4/g, "a").replace(/5/g, "s")
+    .replace(/[^\p{L}\p{M}\p{N}]/gu, "");
+}
+
+function isProfanity(word) {
+  const normalized = normalizeProfanityToken(word);
+  if (!normalized) return false;
+  if (PROFANITY_WORDS.has(normalized)) return true;
+  return /^(?:fuck|fuk|fck)(?:s|ing|in|ed|er|ers)?$/i.test(normalized) ||
+    /^(?:shit)(?:s|ty)?$/i.test(normalized) ||
+    /^(?:bitch)(?:es|ing)?$/i.test(normalized) ||
+    /^(?:dick)(?:s|head|heads)?$/i.test(normalized) ||
+    /^(?:asshole|bastard|whore|slut)(?:s)?$/i.test(normalized) ||
+    /^(?:pussy)(?:s|ies)?$/i.test(normalized);
+}
+
+function maskProfanity(word) {
+  const text = String(word);
+  const match = text.match(/^(\P{L}|\P{N})*([\p{L}\p{M}\p{N}*]+)([^\p{L}\p{N}]*)$/u);
+  if (!match || !isProfanity(match[2])) return text;
+  const token = match[2];
+  if (token.length <= 3) return match[1] + "*".repeat(token.length) + match[3];
+  const prefix = token.slice(0, 2);
+  const suffix = token.slice(Math.max(2, token.length - 3));
+  const middle = Math.max(1, token.length - prefix.length - suffix.length);
+  return match[1] + prefix + "*".repeat(middle) + suffix + match[3];
+}
+
 function buildAssHeader(fontName, marginV = 190) {
   const whiteColor = "&H00FFFFFF";
   const outlineColor = "&H00000000";
@@ -171,7 +217,7 @@ function buildAssCaptions(words, clipStartTime, clipEndTime, highlightColorHex, 
 // Words inside this clip, shifted so the clip's own start is t=0.
   const inClip = (words || []).filter((w) => w.end > clipStartTime && w.start < clipEndTime);
   const clipWords = cleanWords(inClip).map((w) => ({
-    word: w.word,
+    word: maskProfanity(w.word),
     start: Math.max(0, w.start - clipStartTime),
     end: Math.max(0, w.end - clipStartTime),
   }));
@@ -218,4 +264,7 @@ module.exports = {
   cleanWords,
   groupIntoLines,
   containsDevanagari,
+  normalizeProfanityToken,
+  isProfanity,
+  maskProfanity,
 };
