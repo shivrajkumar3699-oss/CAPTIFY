@@ -91,7 +91,7 @@ function isProfanity(word) {
 
 function maskProfanity(word) {
   const text = String(word);
-  const match = text.match(/^(\P{L}|\P{N})*([\p{L}\p{M}\p{N}*]+)([^\p{L}\p{N}]*)$/u);
+  const match = text.match(/^([^\p{L}\p{N}]*)([\p{L}\p{M}\p{N}*]+)([^\p{L}\p{N}]*)$/u);
   if (!match || !isProfanity(match[2])) return text;
   const token = match[2];
   if (token.length <= 3) return match[1] + "*".repeat(token.length) + match[3];
