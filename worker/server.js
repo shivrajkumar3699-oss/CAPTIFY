@@ -1719,9 +1719,9 @@ async function runSmartRender(
       await reportStatus({
         status: "rendering",
         progress:
-          50 +
+          75 +
           Math.round(
-            (i / total) * 45
+            (i / total) * 25
           ),
         message:
           `Rendering clip ${clipNum} of ${total}`,
