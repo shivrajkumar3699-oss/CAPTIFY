@@ -440,7 +440,8 @@ function buildFilterGraph(
     filters.push(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
-      "setsar=1," +
+      "setsar=1,scale='min(1280,iw)':'min(1280,ih)':" +
+      "force_original_aspect_ratio=decrease:force_divisible_by=2," +
       "scale=" +
       W +
       ":" +
@@ -474,6 +475,8 @@ function buildFilterGraph(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
       "setsar=1," +
+      "scale='min(1280,iw)':'min(1280,ih)':" +
+      "force_original_aspect_ratio=decrease:force_divisible_by=2," +
       "split=2[bgsrc][fgsrc]"
     );
 
