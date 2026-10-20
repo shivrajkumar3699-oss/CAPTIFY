@@ -19,7 +19,6 @@ const {
   VIDEO_HEIGHT,
   buildEditedClip,
   getVideoInfo,
-  cutRawClip,
 } = require("./lib/pipeline");
 
 const {
@@ -75,7 +74,7 @@ const BUILD_COMMIT =
   "unknown";
 
 const PIPELINE_VERSION =
-  "2026-10-normalize-runtime-framing-v1";
+  "2026-10-single-pass-render-v2";
 
 const STATUS_DIR = path.join(
   STORAGE_DIR || "",
@@ -1737,29 +1736,13 @@ async function runSmartRender(
       );
 
       // ------------------------------------------------------
-      // Normalize the browser-trimmed hook.
+      // Single-pass rendering.
       //
-      // Stream copy is intentionally NOT used. The selected hook may
-      // contain rotation/display-matrix/SAR metadata that does not match
-      // its decoded frame orientation. cutRawClip() decodes it, lets
-      // FFmpeg autorotate the pixels, forces SAR 1:1 and caps the long
-      // side at 1280 for Render Free memory safety.
+      // Keep the browser-trimmed input as the downloadable raw clip.
+      // The final FFmpeg graph corrects SAR/rotation, caps frames at
+      // 1280px before expensive filters, and encodes the 1080x1920 output
+      // once. This avoids the previous extra decode/scale/H.264 encode.
       // ------------------------------------------------------
-
-      await reportStatus({
-        status: "rendering",
-        progress:
-          50 +
-          Math.round(
-            (i / total) * 5
-          ),
-        message:
-          "Normalizing clip " +
-          clipNum +
-          " of " +
-          total,
-        clips,
-      });
 
       const uploadedClipInfo =
         await getVideoInfo(
@@ -1771,7 +1754,7 @@ async function runSmartRender(
           jobId +
           "] smart clip " +
           clipNum +
-          ": uploaded source=" +
+          ": source=" +
           uploadedClipInfo.width +
           "x" +
           uploadedClipInfo.height +
@@ -1781,67 +1764,35 @@ async function runSmartRender(
           uploadedClipInfo.rotation
       );
 
-      await cutRawClip(
-        uploadedClipPath,
-        0,
-        clipDuration,
-        rawOutPath,
-        (normalizeProgress) => {
-          const clipStartProgress =
-            50 +
-            (i / total) * 25;
-
-          const clipEndProgress =
-            50 +
-            (i / total) * 25 +
-            5;
-
-          const renderProgress =
-            Math.round(
-              clipStartProgress +
-              (Math.max(
-                0,
-                Math.min(
-                  100,
-                  Number(normalizeProgress) || 0
-                )
-              ) /
-                100) *
-                (clipEndProgress - clipStartProgress)
-            );
-
-          void reportStatus({
-            status: "rendering",
-            progress: renderProgress,
-            message:
-              "Normalizing clip " +
-              clipNum +
-              " of " +
-              total,
-            clips,
-          });
-        }
-      );
-
-      const normalizedClipInfo =
-        await getVideoInfo(
+      // Prefer a hard link so the raw download does not duplicate a large
+      // upload on Render's small ephemeral disk. Fall back to copying when
+      // hard links are unavailable.
+      try {
+        fs.linkSync(
+          uploadedClipPath,
           rawOutPath
         );
+      } catch {
+        fs.copyFileSync(
+          uploadedClipPath,
+          rawOutPath
+        );
+      }
 
-      console.log(
-        "[" +
-          jobId +
-          "] smart clip " +
-          clipNum +
-          ": normalized=" +
-          normalizedClipInfo.width +
-          "x" +
-          normalizedClipInfo.height +
-          " sar=" +
-          normalizedClipInfo.sampleAspectRatio +
-          " rotation=" +
-          normalizedClipInfo.rotation
-      );
+      const normalizedClipInfo =
+        uploadedClipInfo;
+
+      await reportStatus({
+        status: "rendering",
+        progress:
+          75 +
+          Math.round(
+            (i / total) * 25
+          ),
+        message:
+          `Rendering clip ${clipNum} of ${total}`,
+        clips,
+      });
 
       // ------------------------------------------------------
       // Captions
@@ -1979,9 +1930,9 @@ async function runSmartRender(
       await reportStatus({
         status: "rendering",
         progress:
-          50 +
+          75 +
           Math.round(
-            ((i + 1) / total) * 45
+            ((i + 1) / total) * 25
           ),
         message:
           `Clip ${clipNum} of ${total} completed`,
