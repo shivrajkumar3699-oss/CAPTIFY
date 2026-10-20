@@ -19,7 +19,6 @@ const {
   VIDEO_HEIGHT,
   buildEditedClip,
   getVideoInfo,
-  cutRawClip,
 } = require("./lib/pipeline");
 
 const {
@@ -1765,10 +1764,20 @@ async function runSmartRender(
           uploadedClipInfo.rotation
       );
 
-      fs.copyFileSync(
-        uploadedClipPath,
-        rawOutPath
-      );
+      // Prefer a hard link so the raw download does not duplicate a large
+      // upload on Render's small ephemeral disk. Fall back to copying when
+      // hard links are unavailable.
+      try {
+        fs.linkSync(
+          uploadedClipPath,
+          rawOutPath
+        );
+      } catch {
+        fs.copyFileSync(
+          uploadedClipPath,
+          rawOutPath
+        );
+      }
 
       const normalizedClipInfo =
         uploadedClipInfo;
