@@ -1889,6 +1889,8 @@ async function runSmartRender(
         lastRenderProgress;
       let lastRenderReportAt = 0;
 
+      const logoOptions = resolveLogoOptions(options);
+
       await buildEditedClip(
         rawOutPath,
         assPath,
@@ -1954,7 +1956,8 @@ async function runSmartRender(
             }
           }
         },
-        normalizedClipInfo
+        normalizedClipInfo,
+        logoOptions
       );
 
       clips.push({
@@ -2172,6 +2175,84 @@ app.get(
 // ------------------------------------------------------------
 // AI VIDEO DIRECTOR — short, structured editing instructions
 // ------------------------------------------------------------
+
+function resolveLogoOptions(options) {
+  const logoId = String(options?.logoId || "").trim();
+  if (!logoId) return null;
+  if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) {
+    throw new Error("Invalid logo upload reference.");
+  }
+
+  const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
+  const candidates = [".png", ".jpg", ".webp"];
+  const logoPath = candidates
+    .map((ext) => path.join(logoDir, logoId + ext))
+    .find((candidate) => fs.existsSync(candidate));
+
+  if (!logoPath) {
+    throw new Error("Uploaded logo is missing or expired. Upload it again.");
+  }
+
+  const validPositions = new Set(["top-right", "top-left", "bottom-right", "bottom-left"]);
+  const validSizes = new Set(["small", "medium", "large"]);
+
+  return {
+    path: logoPath,
+    position: validPositions.has(options?.logoPosition) ? options.logoPosition : "top-right",
+    size: validSizes.has(options?.logoSize) ? options.logoSize : "small",
+  };
+}
+
+app.put(
+  "/upload-logo/:logoId",
+  checkSecret,
+  express.raw({
+    type: ["image/png", "image/jpeg", "image/webp"],
+    limit: "100mb",
+  }),
+  (req, res) => {
+    const logoId = String(req.params.logoId || "").trim();
+    if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) {
+      return res.status(400).json({ error: "Invalid logo upload reference." });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: "Upload a PNG, JPEG, or WebP logo image." });
+    }
+    if (req.body.length > 100 * 1024 * 1024) {
+      return res.status(413).json({ error: "Logo images must be 100 MB or smaller." });
+    }
+
+    const buffer = req.body;
+    let extension = null;
+    if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+      extension = ".png";
+    } else if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+      extension = ".jpg";
+    } else if (
+      buffer.length >= 12 &&
+      buffer.toString("ascii", 0, 4) === "RIFF" &&
+      buffer.toString("ascii", 8, 12) === "WEBP"
+    ) {
+      extension = ".webp";
+    }
+    if (!extension) {
+      return res.status(415).json({ error: "The file content is not a supported PNG, JPEG, or WebP image." });
+    }
+
+    const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
+    try {
+      fs.mkdirSync(logoDir, { recursive: true });
+      for (const ext of [".png", ".jpg", ".webp"]) {
+        fs.rmSync(path.join(logoDir, logoId + ext), { force: true });
+      }
+      fs.writeFileSync(path.join(logoDir, logoId + extension), buffer, { flag: "wx" });
+      return res.status(201).json({ ok: true, logoId });
+    } catch (error) {
+      console.error("[logo-upload] save failed:", error?.message || error);
+      return res.status(500).json({ error: "Could not save the logo image." });
+    }
+  }
+);
 
 const { interpretVideoEditRequest } = require("./lib/aiEdit");
 
