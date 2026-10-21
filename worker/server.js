@@ -5,6 +5,8 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const { Transform } = require("stream");
+const crypto = require("crypto");
 
 const {
   transcribeWithTimestamps,
@@ -125,7 +127,7 @@ const BUILD_COMMIT =
   "unknown";
 
 const PIPELINE_VERSION =
-  "2026-10-single-pass-render-v2";
+  "2026-10-single-pass-logo-overlay-v3";
 
 const STATUS_DIR = path.join(
   STORAGE_DIR || "",
@@ -666,7 +668,7 @@ function uploadCors(req, res, next) {
 
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset, X-Chunk-Index, X-Total-Chunks"
+    "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset, X-Chunk-Index, X-Total-Chunks, X-Logo-Upload-Token"
   );
 
   if (req.method === "OPTIONS") {
@@ -1889,6 +1891,8 @@ async function runSmartRender(
         lastRenderProgress;
       let lastRenderReportAt = 0;
 
+      const logoOptions = resolveLogoOptions(options);
+
       await buildEditedClip(
         rawOutPath,
         assPath,
@@ -1954,7 +1958,8 @@ async function runSmartRender(
             }
           }
         },
-        normalizedClipInfo
+        normalizedClipInfo,
+        logoOptions
       );
 
       clips.push({
@@ -1985,6 +1990,8 @@ async function runSmartRender(
         clips,
       });
     }
+
+    cleanupLogoUpload(options);
 
     // --------------------------------------------------------
     // Cleanup temporary files
@@ -2042,6 +2049,7 @@ async function runSmartRender(
       `[${jobId}] Smart pipeline completed successfully`
     );
   } catch (err) {
+    cleanupLogoUpload(options);
     try {
       fs.rmSync(
         tmpDir,
@@ -2168,6 +2176,269 @@ app.get(
     return res.sendFile(filePath);
   }
 );
+
+// ------------------------------------------------------------
+// AI VIDEO DIRECTOR — short, structured editing instructions
+// ------------------------------------------------------------
+
+function cleanupLogoUpload(options) {
+  const logoId = String(options?.logoId || "").trim();
+  if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) return;
+  const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
+  for (const ext of [".png", ".jpg", ".webp"]) {
+    try {
+      fs.rmSync(path.join(logoDir, logoId + ext), { force: true });
+    } catch (error) {
+      console.warn("[logo-upload] cleanup failed:", error?.message || error);
+    }
+  }
+}
+
+function resolveLogoOptions(options) {
+  const logoId = String(options?.logoId || "").trim();
+  if (!logoId) return null;
+  if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) {
+    throw new Error("Invalid logo upload reference.");
+  }
+
+  const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
+  const candidates = [".png", ".jpg", ".webp"];
+  const logoPath = candidates
+    .map((ext) => path.join(logoDir, logoId + ext))
+    .find((candidate) => fs.existsSync(candidate));
+
+  if (!logoPath) {
+    throw new Error("Uploaded logo is missing or expired. Upload it again.");
+  }
+
+  const validPositions = new Set(["top-right", "top-left", "bottom-right", "bottom-left"]);
+  const validSizes = new Set(["small", "medium", "large"]);
+
+  return {
+    path: logoPath,
+    position: validPositions.has(options?.logoPosition) ? options.logoPosition : "top-right",
+    size: validSizes.has(options?.logoSize) ? options.logoSize : "small",
+  };
+}
+
+function verifyLogoUploadToken(token, logoId) {
+  if (!WORKER_SECRET) return null;
+  const parts = String(token || "").split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+
+  const [payloadPart, signature] = parts;
+  const expected = crypto
+    .createHmac("sha256", WORKER_SECRET)
+    .update(payloadPart)
+    .digest("base64url");
+
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (
+    actualBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+  ) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(payloadPart, "base64url").toString("utf8")
+    );
+    if (
+      payload.logoId !== logoId ||
+      typeof payload.userId !== "string" ||
+      !payload.userId ||
+      payload.contentType == null ||
+      !Number.isSafeInteger(payload.size) ||
+      payload.size <= 0 ||
+      payload.size > 100 * 1024 * 1024 ||
+      payload.maxBytes !== 100 * 1024 * 1024 ||
+      !Number.isFinite(payload.exp) ||
+      payload.exp <= Date.now() ||
+      payload.exp > Date.now() + 11 * 60 * 1000
+    ) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+app.options(
+  "/upload-logo/:logoId",
+  uploadCors
+);
+
+app.put(
+  "/upload-logo/:logoId",
+  uploadCors,
+  async (req, res) => {
+    const logoId = String(req.params.logoId || "").trim();
+    if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) {
+      return res.status(400).json({ error: "Invalid logo upload reference." });
+    }
+
+    const claims = verifyLogoUploadToken(
+      req.headers["x-logo-upload-token"],
+      logoId
+    );
+    if (!claims) {
+      return res.status(401).json({ error: "The logo upload link is invalid or expired. Please retry the upload." });
+    }
+
+    const contentType = String(req.headers["content-type"] || "").toLowerCase();
+    if (
+      !["image/png", "image/jpeg", "image/webp"].includes(contentType) ||
+      contentType !== claims.contentType
+    ) {
+      return res.status(415).json({ error: "Use the same PNG, JPEG, or WebP image type selected for upload." });
+    }
+
+    const maxBytes = claims.maxBytes;
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > maxBytes) {
+      return res.status(413).json({ error: "Logo images must be 100 MB or smaller." });
+    }
+    if (declaredLength > 0 && declaredLength !== claims.size) {
+      return res.status(400).json({ error: "The upload size changed. Please retry the upload." });
+    }
+
+    const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
+    const tempPath = path.join(logoDir, logoId + ".uploading-" + WORKER_INSTANCE_ID);
+    let receivedBytes = 0;
+
+    try {
+      fs.mkdirSync(logoDir, { recursive: true });
+      const limiter = new Transform({
+        transform(chunk, encoding, callback) {
+          receivedBytes += chunk.length;
+          if (receivedBytes > maxBytes) {
+            callback(new Error("LOGO_TOO_LARGE"));
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+      const destination = fs.createWriteStream(tempPath, { flags: "wx" });
+
+      await new Promise((resolve, reject) => {
+        req.on("error", reject);
+        limiter.on("error", (error) => {
+          destination.destroy(error);
+          reject(error);
+        });
+        destination.on("error", reject);
+        destination.on("finish", resolve);
+        req.pipe(limiter).pipe(destination);
+      });
+
+      if (receivedBytes === 0) {
+        throw new Error("LOGO_EMPTY");
+      }
+      if (receivedBytes !== claims.size) {
+        throw new Error("LOGO_SIZE_MISMATCH");
+      }
+
+      const signature = Buffer.alloc(12);
+      const fd = fs.openSync(tempPath, "r");
+      let bytesRead = 0;
+      try {
+        bytesRead = fs.readSync(fd, signature, 0, signature.length, 0);
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      let extension = null;
+      if (
+        bytesRead >= 8 &&
+        signature.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      ) {
+        extension = ".png";
+      } else if (
+        bytesRead >= 3 &&
+        signature[0] === 0xff &&
+        signature[1] === 0xd8 &&
+        signature[2] === 0xff
+      ) {
+        extension = ".jpg";
+      } else if (
+        bytesRead >= 12 &&
+        signature.toString("ascii", 0, 4) === "RIFF" &&
+        signature.toString("ascii", 8, 12) === "WEBP"
+      ) {
+        extension = ".webp";
+      }
+
+      if (!extension) {
+        throw new Error("LOGO_UNSUPPORTED");
+      }
+
+      for (const ext of [".png", ".jpg", ".webp"]) {
+        fs.rmSync(path.join(logoDir, logoId + ext), { force: true });
+      }
+      const finalPath = path.join(logoDir, logoId + extension);
+      fs.renameSync(tempPath, finalPath);
+
+      let imageInfo;
+      try {
+        imageInfo = await getVideoInfo(finalPath);
+      } catch {
+        fs.rmSync(finalPath, { force: true });
+        return res.status(415).json({ error: "The uploaded file is not a readable image." });
+      }
+
+      if (
+        imageInfo.width > 8192 ||
+        imageInfo.height > 8192 ||
+        imageInfo.width * imageInfo.height > 40000000
+      ) {
+        fs.rmSync(finalPath, { force: true });
+        return res.status(413).json({ error: "Logo dimensions are too large. Use an image no larger than 8192px per side or 40 megapixels." });
+      }
+
+      return res.status(201).json({
+        ok: true,
+        logoId,
+        bytes: receivedBytes,
+        width: imageInfo.width,
+        height: imageInfo.height,
+      });
+    } catch (error) {
+      try { fs.rmSync(tempPath, { force: true }); } catch {}
+      const message = String(error?.message || "");
+      if (message === "LOGO_TOO_LARGE") {
+        return res.status(413).json({ error: "Logo images must be 100 MB or smaller." });
+      }
+      if (message === "LOGO_EMPTY") {
+        return res.status(400).json({ error: "The image upload was empty." });
+      }
+      if (message === "LOGO_SIZE_MISMATCH") {
+        return res.status(400).json({ error: "The uploaded image was incomplete. Please retry the upload." });
+      }
+      if (message === "LOGO_UNSUPPORTED") {
+        return res.status(415).json({ error: "The file content is not a supported PNG, JPEG, or WebP image." });
+      }
+      console.error("[logo-upload] save failed:", message || "unknown error");
+      return res.status(500).json({ error: "Could not save the logo image." });
+    }
+  }
+);
+const { interpretVideoEditRequest } = require("./lib/aiEdit");
+
+app.post("/ai-edit", checkSecret, async (req, res) => {
+  try {
+    const message = typeof req.body?.message === "string" ? req.body.message : "";
+    const result = await interpretVideoEditRequest(message);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    const message = String(error?.message || "Could not interpret the edit request.");
+    const status = /1–2000 characters/.test(message) ? 400 : 502;
+    console.error("[ai-edit] request failed:", message);
+    return res.status(status).json({ error: status === 400 ? message : "AI editing helper is temporarily unavailable." });
+  }
+});
 
 // ------------------------------------------------------------
 // HEALTH CHECK

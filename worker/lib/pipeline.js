@@ -428,10 +428,13 @@ function buildFilterGraph(
   framing,
   escapedAss,
   hasBgm,
-  clipDuration
+  clipDuration,
+  logoOptions = null
 ) {
   const W = VIDEO_WIDTH;
   const H = VIDEO_HEIGHT;
+
+  const videoBaseLabel = logoOptions ? "vbase" : "v";
 
   const captionFilter =
     "ass='" +
@@ -464,7 +467,7 @@ function buildFilterGraph(
       "[fg]" +
       "fade=t=in:st=0:d=0.4," +
       captionFilter +
-      ",setsar=1,format=yuv420p[v]"
+      ",setsar=1,format=yuv420p[" + videoBaseLabel + "]"
     );
   } else if (framing === "fit-black") {
     // Preserve the source aspect ratio and center it on a solid black 9:16 canvas.
@@ -483,7 +486,7 @@ function buildFilterGraph(
       "[fg]" +
       "fade=t=in:st=0:d=0.4," +
       captionFilter +
-      ",setsar=1,format=yuv420p[v]"
+      ",setsar=1,format=yuv420p[" + videoBaseLabel + "]"
     );
   } else {
     // Fit frame means zoom and center-crop to fill the vertical canvas.
@@ -505,7 +508,7 @@ function buildFilterGraph(
       "[fg]" +
       "fade=t=in:st=0:d=0.4," +
       captionFilter +
-      ",setsar=1,format=yuv420p[v]"
+      ",setsar=1,format=yuv420p[" + videoBaseLabel + "]"
     );
   }
 
@@ -557,6 +560,32 @@ function buildFilterGraph(
         "[a]"
       );
     }
+  }
+
+  if (logoOptions && Number.isInteger(logoOptions.inputIndex)) {
+    const logoWidth = Math.round(
+      W * (
+        logoOptions.size === "large" ? 0.25 :
+        logoOptions.size === "medium" ? 0.18 : 0.12
+      )
+    );
+    const margin = Math.round(W * 0.035);
+    const position = logoOptions.position || "top-right";
+    const x = position.endsWith("left")
+      ? String(margin)
+      : "W-w-" + margin;
+    const y = position.startsWith("top")
+      ? String(margin)
+      : "H-h-" + margin;
+
+    filters.push(
+      "[" + logoOptions.inputIndex + ":v]" +
+      "scale=" + logoWidth + ":-1[logo]"
+    );
+    filters.push(
+      "[vbase][logo]overlay=x=" + x + ":y=" + y +
+      ":shortest=1:format=auto,format=yuv420p[v]"
+    );
   }
 
   return filters;
@@ -741,7 +770,8 @@ async function buildEditedClip(
   outputPath,
   framing,
   onProgress,
-  sourceInfo
+  sourceInfo,
+  logoOptions = null
 ) {
   const mode =
     framing === "fit"
@@ -768,6 +798,10 @@ async function buildEditedClip(
   const escapedAss =
     escapePathForFilter(assPath);
 
+  if (logoOptions && logoOptions.path) {
+    logoOptions.inputIndex = bgmPath ? 2 : 1;
+  }
+
   const filters =
     buildFilterGraph(
       {
@@ -779,7 +813,8 @@ async function buildEditedClip(
       mode,
       escapedAss,
       Boolean(bgmPath),
-      clipDuration
+      clipDuration,
+      logoOptions
     );
 
   console.log(
@@ -806,6 +841,11 @@ async function buildEditedClip(
 
     if (bgmPath) {
       command.input(bgmPath);
+    }
+
+    if (logoOptions && logoOptions.path) {
+      logoOptions.inputIndex = bgmPath ? 2 : 1;
+      command.input(logoOptions.path).inputOptions(["-loop", "1"]);
     }
 
     const maps = bgmPath
