@@ -27,7 +27,7 @@ async function interpretVideoEditRequest(message) {
     "Return ONLY compact JSON, no markdown or explanation.",
     "Schema: { reply: string, edits: { logoPosition: string|null, logoSize: string|null, captionColor: string|null, framing: string|null, notes: string[] } }.",
     "Keep reply under 8 words. Only include supported, explicit requests; never invent edits.",
-    "logoPosition must be one of top-right, top-left, bottom-right, bottom-left, null.",
+    "logoPosition must be one of top-right, top-center, top-left, bottom-right, bottom-center, bottom-left, null.",
     "logoSize must be one of small, medium, large, null.",
     "captionColor must be a hex color or null.",
     "framing must be fill, fit, fit-black, or null.",
@@ -60,7 +60,7 @@ async function interpretVideoEditRequest(message) {
     throw new Error("Gemini returned an invalid edit plan. Please rephrase.");
   }
 
-  const validPositions = new Set(["top-right", "top-left", "bottom-right", "bottom-left"]);
+  const validPositions = new Set(["top-right", "top-center", "top-left", "bottom-right", "bottom-center", "bottom-left"]);
   const validSizes = new Set(["small", "medium", "large"]);
   const validFraming = new Set(["fill", "fit", "fit-black"]);
   const color = typeof parsed?.edits?.captionColor === "string" &&
