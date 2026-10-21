@@ -763,87 +763,98 @@ export default function Home() {
     return () => stopPolling();
   }, [stopPolling]);
 
+  // Cache each finished clip as soon as the worker reports it. Render Free
+  // storage is ephemeral, so waiting until all clips finish leaves earlier
+  // outputs vulnerable to a worker restart. Serialize downloads to avoid
+  // opening several large MP4 streams against the constrained worker at once.
+  const cachedPreviewUrlsRef = useRef(new Map<string, string>());
+  const clipCacheQueueRef = useRef<Promise<void>>(Promise.resolve());
+
   const cacheGeneratedClips = useCallback(
-    async (clips: ClipResult[]) => {
-      const cached = await Promise.all(
-        clips.map(async (clip) => {
+    (clips: ClipResult[]) => {
+      const task = clipCacheQueueRef.current.then(async () => {
+        const cached: ClipResult[] = [];
+
+        for (const clip of clips) {
           if (!clip.editedUrl) {
-            return clip;
+            cached.push(clip);
+            continue;
           }
 
-          // Keep the generated MP4 in the browser while this session is open.
-          // Render Free uses ephemeral /tmp storage, so a worker restart can
-          // otherwise make an already-finished clip return HTTP 404.
+          const existingUrl = cachedPreviewUrlsRef.current.get(clip.editedUrl);
+          if (clip.previewUrl || existingUrl) {
+            cached.push({
+              ...clip,
+              previewUrl: clip.previewUrl || existingUrl,
+            });
+            continue;
+          }
+
+          let previewUrl: string | undefined;
+
           for (let attempt = 0; attempt < 3; attempt++) {
             try {
-              const response = await fetch(
-                clip.editedUrl,
-                { cache: "no-store" }
-              );
+              const response = await fetch(clip.editedUrl, {
+                cache: "no-store",
+              });
 
-              if (
-                !response.ok ||
-                !response.body
-              ) {
-                throw new Error(
-                  "Clip fetch returned HTTP " +
-                    response.status
-                );
+              if (!response.ok || !response.body) {
+                throw new Error("Clip fetch returned HTTP " + response.status);
               }
 
-              const contentType =
-                response.headers.get(
-                  "content-type"
-                ) || "";
-
-              if (
-                !contentType
-                  .toLowerCase()
-                  .includes("video/mp4")
-              ) {
-                throw new Error(
-                  "Generated clip was not returned as MP4."
-                );
+              const contentType = response.headers.get("content-type") || "";
+              if (!contentType.toLowerCase().includes("video/mp4")) {
+                throw new Error("Generated clip was not returned as MP4.");
               }
 
-              const blob =
-                await response.blob();
-
+              const blob = await response.blob();
               if (blob.size <= 0) {
-                throw new Error(
-                  "Generated clip is empty."
-                );
+                throw new Error("Generated clip is empty.");
               }
 
-              return {
-                ...clip,
-                previewUrl:
-                  URL.createObjectURL(blob),
-              };
+              previewUrl = URL.createObjectURL(blob);
+              cachedPreviewUrlsRef.current.set(clip.editedUrl, previewUrl);
+              break;
             } catch (error) {
               if (attempt === 2) {
-                console.warn(
-                  "Could not cache generated clip:",
-                  clip.index + 1,
-                  error
-                );
+                console.warn("Could not cache generated clip:", clip.index + 1, error);
               } else {
-                await new Promise(
-                  (resolve) =>
-                    setTimeout(
-                      resolve,
-                      800 * (attempt + 1)
-                    )
+                await new Promise((resolve) =>
+                  setTimeout(resolve, 800 * (attempt + 1))
                 );
               }
             }
           }
 
-          return clip;
-        })
-      );
+          const result = { ...clip, ...(previewUrl ? { previewUrl } : {}) };
+          cached.push(result);
 
-      return cached;
+          // Update this clip immediately; don't wait for the remaining clips.
+          if (previewUrl) {
+            setStatus((current) => {
+              if (
+                !current ||
+                !clip.editedUrl.includes(`/api/download/${current.jobId}/`)
+              ) {
+                return current;
+              }
+              return {
+                ...current,
+                clips: (current.clips || []).map((item) =>
+                  item.editedUrl === clip.editedUrl
+                    ? { ...item, previewUrl }
+                    : item
+                ),
+              };
+            });
+          }
+        }
+
+        return cached;
+      });
+
+      clipCacheQueueRef.current = task.then(() => undefined, () => undefined);
+      return task;
     },
     []
   );
@@ -962,6 +973,12 @@ export default function Home() {
           ...data,
           progress: highestProgressRef.current,
         }));
+
+        // Begin caching every newly completed clip during rendering. The
+        // serialized cache queue deduplicates already-cached clip URLs.
+        if (Array.isArray(data.clips) && data.clips.length > 0) {
+          void cacheGeneratedClips(data.clips);
+        }
       } catch (err) {
         console.error(err);
       }
