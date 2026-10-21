@@ -468,59 +468,23 @@ function buildFilterGraph(
       ",setsar=1,format=yuv420p[v]"
     );
   } else {
-    const bgW = Math.max(
-      2,
-      Math.floor(W / 4 / 2) * 2
-    );
-
-    const bgH = Math.max(
-      2,
-      Math.floor(H / 4 / 2) * 2
-    );
-
+    // "Fit" preserves the complete source frame. Do not create a blurred,
+    // enlarged duplicate behind a landscape video; use clean black letterbox
+    // space instead. This also removes several expensive scaling/blur passes.
     filters.push(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
       "setsar=1," +
       "scale='min(1280,iw)':'min(1280,ih)':" +
       "force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      "split=2[bgsrc][fgsrc]"
-    );
-
-    filters.push(
-      "[bgsrc]" +
-      "scale=" +
-      bgW +
-      ":" +
-      bgH +
-      ":force_original_aspect_ratio=increase," +
-      "crop=" +
-      bgW +
-      ":" +
-      bgH +
-      ":(iw-ow)/2:(ih-oh)/2," +
-      "gblur=sigma=8," +
-      "scale=" +
-      W +
-      ":" +
-      H +
-      ",eq=brightness=-0.1[bg]"
-    );
-
-    filters.push(
-      "[fgsrc]" +
-      "scale=" +
-      W +
-      ":" +
-      H +
-      ":force_original_aspect_ratio=decrease:" +
-      "force_divisible_by=2," +
+      "scale=" + W + ":" + H +
+      ":force_original_aspect_ratio=decrease:force_divisible_by=2," +
+      "pad=" + W + ":" + H + ":(ow-iw)/2:(oh-ih)/2:color=black," +
       "setsar=1[fg]"
     );
 
     filters.push(
-      "[bg][fg]" +
-      "overlay=(W-w)/2:(H-h)/2," +
+      "[fg]" +
       "fade=t=in:st=0:d=0.4," +
       captionFilter +
       ",setsar=1,format=yuv420p[v]"
