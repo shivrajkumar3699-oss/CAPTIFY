@@ -6,6 +6,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const { Transform } = require("stream");
+const crypto = require("crypto");
 
 const {
   transcribeWithTimestamps,
@@ -667,7 +668,7 @@ function uploadCors(req, res, next) {
 
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset, X-Chunk-Index, X-Total-Chunks"
+    "Content-Type, Content-Range, X-Upload-Total, X-Upload-Offset, X-Chunk-Index, X-Total-Chunks, X-Logo-Upload-Token"
   );
 
   if (req.method === "OPTIONS") {
@@ -2220,21 +2221,79 @@ function resolveLogoOptions(options) {
   };
 }
 
+function verifyLogoUploadToken(token, logoId) {
+  if (!WORKER_SECRET) return null;
+  const parts = String(token || "").split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+
+  const [payloadPart, signature] = parts;
+  const expected = crypto
+    .createHmac("sha256", WORKER_SECRET)
+    .update(payloadPart)
+    .digest("base64url");
+
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (
+    actualBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+  ) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(payloadPart, "base64url").toString("utf8")
+    );
+    if (
+      payload.logoId !== logoId ||
+      typeof payload.userId !== "string" ||
+      !payload.userId ||
+      payload.contentType == null ||
+      payload.maxBytes !== 100 * 1024 * 1024 ||
+      !Number.isFinite(payload.exp) ||
+      payload.exp <= Date.now() ||
+      payload.exp > Date.now() + 11 * 60 * 1000
+    ) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+app.options(
+  "/upload-logo/:logoId",
+  uploadCors
+);
+
 app.put(
   "/upload-logo/:logoId",
-  checkSecret,
+  uploadCors,
   async (req, res) => {
     const logoId = String(req.params.logoId || "").trim();
     if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) {
       return res.status(400).json({ error: "Invalid logo upload reference." });
     }
 
-    const contentType = String(req.headers["content-type"] || "").toLowerCase();
-    if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
-      return res.status(415).json({ error: "Use a PNG, JPEG, or WebP image." });
+    const claims = verifyLogoUploadToken(
+      req.headers["x-logo-upload-token"],
+      logoId
+    );
+    if (!claims) {
+      return res.status(401).json({ error: "The logo upload link is invalid or expired. Please retry the upload." });
     }
 
-    const maxBytes = 100 * 1024 * 1024;
+    const contentType = String(req.headers["content-type"] || "").toLowerCase();
+    if (
+      !["image/png", "image/jpeg", "image/webp"].includes(contentType) ||
+      contentType !== claims.contentType
+    ) {
+      return res.status(415).json({ error: "Use the same PNG, JPEG, or WebP image type selected for upload." });
+    }
+
+    const maxBytes = claims.maxBytes;
     const declaredLength = Number(req.headers["content-length"] || 0);
     if (declaredLength > maxBytes) {
       return res.status(413).json({ error: "Logo images must be 100 MB or smaller." });
@@ -2354,7 +2413,6 @@ app.put(
     }
   }
 );
-
 const { interpretVideoEditRequest } = require("./lib/aiEdit");
 
 app.post("/ai-edit", checkSecret, async (req, res) => {
