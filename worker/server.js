@@ -1631,8 +1631,8 @@ async function runSmartRender(
       : "#FFD700";
 
   const framing =
-    options.framing === "fit"
-      ? "fit"
+    options.framing === "fit" || options.framing === "fit-black"
+      ? options.framing
       : "fill";
 
   const useBgm =
@@ -1663,7 +1663,7 @@ async function runSmartRender(
       "x" +
       VIDEO_HEIGHT +
       " framing=" +
-      (options.framing === "fit" ? "fit" : "fill")
+      framing
   );
 
   const usedBgmFiles =
