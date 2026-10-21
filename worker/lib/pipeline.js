@@ -23,6 +23,11 @@ const FFMPEG_THREADS = Number.isInteger(requestedFfmpegThreads)
   ? Math.max(1, Math.min(2, requestedFfmpegThreads))
   : 1;
 
+// Experimental benchmark only; disabled by default because direct crop may
+// increase peak memory for 4K sources.
+const EXPERIMENTAL_DIRECT_CROP =
+  process.env.CAPTIFY_EXPERIMENTAL_DIRECT_CROP === "1";
+
 const COMMON_FFMPEG_OPTIONS = [
   "-threads", String(FFMPEG_THREADS),
   "-filter_threads", "1",
@@ -492,13 +497,15 @@ function buildFilterGraph(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
       "setsar=1," +
-      "scale='min(1280,iw)':'min(1280,ih)':" +
-      "force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      // Crop to 9:16 before scaling to the final output size to reduce peak memory.
-      "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
-      "h='trunc(min(ih,iw*16/9)/2)*2':" +
-      "x='(iw-ow)/2':y='(ih-oh)/2'," +
-      "scale=" + W + ":" + H + ",setsar=1[fg]"
+      (EXPERIMENTAL_DIRECT_CROP
+        ? "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+          "h='trunc(min(ih,iw*16/9)/2)*2':" +
+          "x='(iw-ow)/2':y='(ih-oh)/2',scale=" + W + ":" + H + ","
+        : "scale='min(1280,iw)':'min(1280,ih)':" +
+          "force_original_aspect_ratio=decrease:force_divisible_by=2," +
+          "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+          "h='trunc(min(ih,iw*16/9)/2)*2':" +
+          "x='(iw-ow)/2':y='(ih-oh)/2',scale=" + W + ":" + H + ",")
     );
 
     filters.push(
