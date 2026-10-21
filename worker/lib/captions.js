@@ -176,7 +176,7 @@ function cleanWords(rawWords) {
       end: Number(w.end),
       idx: idx,
     }))
-    .filter((w) => w.word.length > 0 && isFinite(w.start) && isFinite(w.end))
+    .filter((w) => normalizeWord(w.word).length > 0 && isFinite(w.start) && isFinite(w.end))
     .sort((a, b) => a.start - b.start || a.idx - b.idx);
 
 const out = [];
