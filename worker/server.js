@@ -1989,6 +1989,8 @@ async function runSmartRender(
       });
     }
 
+    cleanupLogoUpload(options);
+
     // --------------------------------------------------------
     // Cleanup temporary files
     // --------------------------------------------------------
@@ -2045,6 +2047,7 @@ async function runSmartRender(
       `[${jobId}] Smart pipeline completed successfully`
     );
   } catch (err) {
+    cleanupLogoUpload(options);
     try {
       fs.rmSync(
         tmpDir,
@@ -2175,6 +2178,19 @@ app.get(
 // ------------------------------------------------------------
 // AI VIDEO DIRECTOR — short, structured editing instructions
 // ------------------------------------------------------------
+
+function cleanupLogoUpload(options) {
+  const logoId = String(options?.logoId || "").trim();
+  if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) return;
+  const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
+  for (const ext of [".png", ".jpg", ".webp"]) {
+    try {
+      fs.rmSync(path.join(logoDir, logoId + ext), { force: true });
+    } catch (error) {
+      console.warn("[logo-upload] cleanup failed:", error?.message || error);
+    }
+  }
+}
 
 function resolveLogoOptions(options) {
   const logoId = String(options?.logoId || "").trim();
