@@ -468,59 +468,24 @@ function buildFilterGraph(
       ",setsar=1,format=yuv420p[v]"
     );
   } else {
-    const bgW = Math.max(
-      2,
-      Math.floor(W / 4 / 2) * 2
-    );
-
-    const bgH = Math.max(
-      2,
-      Math.floor(H / 4 / 2) * 2
-    );
-
+    // "Fit" uses a center crop to fill the entire 9:16 canvas. Landscape
+    // sources are zoomed in and cropped equally from the left and right;
+    // portrait sources stay close to their original framing. No bars or
+    // blurred background are added. This is center-crop, not AI subject tracking.
     filters.push(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
       "setsar=1," +
       "scale='min(1280,iw)':'min(1280,ih)':" +
       "force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      "split=2[bgsrc][fgsrc]"
-    );
-
-    filters.push(
-      "[bgsrc]" +
-      "scale=" +
-      bgW +
-      ":" +
-      bgH +
+      "scale=" + W + ":" + H +
       ":force_original_aspect_ratio=increase," +
-      "crop=" +
-      bgW +
-      ":" +
-      bgH +
-      ":(iw-ow)/2:(ih-oh)/2," +
-      "gblur=sigma=8," +
-      "scale=" +
-      W +
-      ":" +
-      H +
-      ",eq=brightness=-0.1[bg]"
-    );
-
-    filters.push(
-      "[fgsrc]" +
-      "scale=" +
-      W +
-      ":" +
-      H +
-      ":force_original_aspect_ratio=decrease:" +
-      "force_divisible_by=2," +
+      "crop=" + W + ":" + H + ":(iw-ow)/2:(ih-oh)/2," +
       "setsar=1[fg]"
     );
 
     filters.push(
-      "[bg][fg]" +
-      "overlay=(W-w)/2:(H-h)/2," +
+      "[fg]" +
       "fade=t=in:st=0:d=0.4," +
       captionFilter +
       ",setsar=1,format=yuv420p[v]"
