@@ -2260,7 +2260,10 @@ app.put(
 
       await new Promise((resolve, reject) => {
         req.on("error", reject);
-        limiter.on("error", reject);
+        limiter.on("error", (error) => {
+          destination.destroy(error);
+          reject(error);
+        });
         destination.on("error", reject);
         destination.on("finish", resolve);
         req.pipe(limiter).pipe(destination);
