@@ -2211,7 +2211,7 @@ function resolveLogoOptions(options) {
     throw new Error("Uploaded logo is missing or expired. Upload it again.");
   }
 
-  const validPositions = new Set(["top-right", "top-left", "bottom-right", "bottom-left"]);
+  const validPositions = new Set(["top-right", "top-center", "top-left", "bottom-right", "bottom-center", "bottom-left"]);
   const validSizes = new Set(["small", "medium", "large"]);
 
   return {
