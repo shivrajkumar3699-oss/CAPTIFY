@@ -8,7 +8,8 @@ import path from "path";
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const MAX_TRANSCRIPTION_CHUNK_SECONDS = 300;
+const MAX_TRANSCRIPTION_CHUNK_SECONDS = 600;
+const TRANSCRIPTION_CONCURRENCY = 2;
 const TRANSCRIPTION_AUDIO_BITRATE = "48k";
 
 // A Roman-script Hinglish prompt. When passed to Whisper as "prompt",
@@ -68,22 +69,65 @@ async function transcribeOneFile(audioPath, language) {
     file: fs.createReadStream(audioPath),
     model: "whisper-large-v3-turbo",
     response_format: "verbose_json",
-    timestamp_granularities: ["word"],
+    timestamp_granularities: ["word", "segment"],
   };
 
   if (language === "en" || language === "hi") {
     params.language = language;
-  } else if (language === "hinglish") {
+  }
+
+  if (language === "hinglish") {
     params.prompt = HINGLISH_PROMPT;
+  } else if (language !== "en") {
+    // Auto mode stays multilingual, but this context helps Whisper recognize
+    // Hindi-dubbed cartoon dialogue and discourages English music hallucinations.
+    params.prompt =
+      "Oggy and the Cockroaches Hindi dubbed cartoon. " +
+      "Hindi dialogue may be mixed with background music. " +
+      "Character names: Oggy, Cockroaches. " +
+      "Examples of Hindi dialogue: chalo ab maza aayega, kya baat hai. " +
+      "Transcribe only speech that is actually audible; do not invent words for music.";
   }
 
   return groq.audio.transcriptions.create(params);
 }
 
+function isLowConfidenceMusicWord(word, segments) {
+  if (!Array.isArray(segments) || segments.length === 0) return false;
+
+  const start = Number(word?.start);
+  const end = Number(word?.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+
+  let best = null;
+  let bestOverlap = 0;
+  for (const segment of segments) {
+    const segStart = Number(segment?.start);
+    const segEnd = Number(segment?.end);
+    if (!Number.isFinite(segStart) || !Number.isFinite(segEnd) || segEnd <= segStart) continue;
+    const overlap = Math.max(0, Math.min(end, segEnd) - Math.max(start, segStart));
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      best = segment;
+    }
+  }
+
+  if (!best || bestOverlap < Math.min(0.03, (end - start) * 0.25)) return false;
+
+  const noSpeech = Number(best.no_speech_prob);
+  const avgLogprob = Number(best.avg_logprob);
+  // Drop words only when Whisper itself marks their containing segment as
+  // likely non-speech, or combines a moderate non-speech score with very low
+  // confidence. Normal spoken lines over background music remain eligible.
+  return noSpeech >= 0.60 ||
+    (noSpeech >= 0.35 && Number.isFinite(avgLogprob) && avgLogprob <= -1.0);
+}
+
 /**
  * Transcribes audio with word-level timestamps. Long audio is split into
- * short, compressed chunks so each Groq request stays well below its upload
- * limit. Chunk-relative timestamps are converted back to full-file time.
+ * short, compressed chunks so each Groq request stays below upload limits.
+ * Low-confidence words from Whisper segments marked as non-speech are removed
+ * to avoid captions such as "Oh Yeah" over instrumental music.
  */
 export async function transcribeWithTimestamps(audioPath, language) {
   const duration = await getAudioDuration(audioPath);
@@ -98,10 +142,10 @@ export async function transcribeWithTimestamps(audioPath, language) {
     );
 
     console.log(
-      `[transcribe] duration=${duration.toFixed(1)}s chunks=${chunkCount} maxChunk=${MAX_TRANSCRIPTION_CHUNK_SECONDS}s`
+      `[transcribe] duration=${duration.toFixed(1)}s chunks=${chunkCount} maxChunk=${MAX_TRANSCRIPTION_CHUNK_SECONDS}s concurrency=${TRANSCRIPTION_CONCURRENCY}`
     );
 
-    for (let index = 0; index < chunkCount; index += 1) {
+    async function transcribeChunk(index) {
       const start = index * MAX_TRANSCRIPTION_CHUNK_SECONDS;
       const chunkDuration = Math.min(
         MAX_TRANSCRIPTION_CHUNK_SECONDS,
@@ -119,13 +163,13 @@ export async function transcribeWithTimestamps(audioPath, language) {
       );
 
       const transcription = await transcribeOneFile(chunkPath, language);
-      const chunkText = String(transcription?.text || "").trim();
-      if (chunkText) transcriptParts.push(chunkText);
+      const segments = Array.isArray(transcription?.segments) ? transcription.segments : [];
+      const words = Array.isArray(transcription?.words) ? transcription.words : [];
+      const acceptedWords = [];
 
-      const words = Array.isArray(transcription?.words)
-        ? transcription.words
-        : [];
       for (const word of words) {
+        if (isLowConfidenceMusicWord(word, segments)) continue;
+
         const adjusted = { ...word };
         if (Number.isFinite(Number(adjusted.start))) {
           adjusted.start = Number(adjusted.start) + start;
@@ -133,9 +177,35 @@ export async function transcribeWithTimestamps(audioPath, language) {
         if (Number.isFinite(Number(adjusted.end))) {
           adjusted.end = Number(adjusted.end) + start;
         }
-        allWords.push(adjusted);
+        acceptedWords.push(adjusted);
+      }
+
+      const chunkText = acceptedWords
+        .map((word) => String(word.word || "").trim())
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+
+      return { words: acceptedWords, text: chunkText };
+    }
+
+    // Keep only two audio conversions/API requests in flight at once. This
+    // reduces serial waiting time without spawning a large CPU/memory burst
+    // on Render Free.
+    for (let batchStart = 0; batchStart < chunkCount; batchStart += TRANSCRIPTION_CONCURRENCY) {
+      const indexes = Array.from(
+        { length: Math.min(TRANSCRIPTION_CONCURRENCY, chunkCount - batchStart) },
+        (_, offset) => batchStart + offset
+      );
+      const results = await Promise.all(indexes.map(transcribeChunk));
+
+      for (const result of results) {
+        allWords.push(...result.words);
+        if (result.text) transcriptParts.push(result.text);
       }
     }
+
+    allWords.sort((a, b) => Number(a.start) - Number(b.start));
 
     return {
       text: transcriptParts.join(" ").trim(),
