@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
       logoId,
       userId,
       contentType,
+      size,
       maxBytes: MAX_LOGO_BYTES,
       exp: Date.now() + 10 * 60 * 1000,
     })).toString("base64url");
