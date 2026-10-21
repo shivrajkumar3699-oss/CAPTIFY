@@ -2250,6 +2250,9 @@ function verifyLogoUploadToken(token, logoId) {
       typeof payload.userId !== "string" ||
       !payload.userId ||
       payload.contentType == null ||
+      !Number.isSafeInteger(payload.size) ||
+      payload.size <= 0 ||
+      payload.size > 100 * 1024 * 1024 ||
       payload.maxBytes !== 100 * 1024 * 1024 ||
       !Number.isFinite(payload.exp) ||
       payload.exp <= Date.now() ||
@@ -2298,6 +2301,9 @@ app.put(
     if (declaredLength > maxBytes) {
       return res.status(413).json({ error: "Logo images must be 100 MB or smaller." });
     }
+    if (declaredLength > 0 && declaredLength !== claims.size) {
+      return res.status(400).json({ error: "The upload size changed. Please retry the upload." });
+    }
 
     const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
     const tempPath = path.join(logoDir, logoId + ".uploading-" + WORKER_INSTANCE_ID);
@@ -2330,6 +2336,9 @@ app.put(
 
       if (receivedBytes === 0) {
         throw new Error("LOGO_EMPTY");
+      }
+      if (receivedBytes !== claims.size) {
+        throw new Error("LOGO_SIZE_MISMATCH");
       }
 
       const signature = Buffer.alloc(12);
@@ -2404,6 +2413,9 @@ app.put(
       }
       if (message === "LOGO_EMPTY") {
         return res.status(400).json({ error: "The image upload was empty." });
+      }
+      if (message === "LOGO_SIZE_MISMATCH") {
+        return res.status(400).json({ error: "The uploaded image was incomplete. Please retry the upload." });
       }
       if (message === "LOGO_UNSUPPORTED") {
         return res.status(415).json({ error: "The file content is not a supported PNG, JPEG, or WebP image." });
