@@ -867,10 +867,10 @@ async function buildEditedClip(
         const text = String(line);
         const now = Date.now();
         const elapsedSeconds = ((now - renderStartedAt) / 1000).toFixed(1);
-        const timeMatch = text.match(/time=\\s*(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)/);
-        const speedMatch = text.match(/speed=\\s*([0-9.]+)x/);
-        const fpsMatch = text.match(/fps=\\s*([0-9.]+)/);
-        const frameMatch = text.match(/frame=\\s*(\\d+)/);
+        const timeMatch = text.match(/time=\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
+        const speedMatch = text.match(/speed=\s*([0-9.]+)x/);
+        const fpsMatch = text.match(/fps=\s*([0-9.]+)/);
+        const frameMatch = text.match(/frame=\s*(\d+)/);
 
         if (timeMatch) latestFfmpegTime = timeMatch[1];
         if (speedMatch) latestFfmpegSpeed = speedMatch[1] + "x";
