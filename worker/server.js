@@ -5,6 +5,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const { Transform } = require("stream");
 
 const {
   transcribeWithTimestamps,
@@ -2222,49 +2223,105 @@ function resolveLogoOptions(options) {
 app.put(
   "/upload-logo/:logoId",
   checkSecret,
-  express.raw({
-    type: ["image/png", "image/jpeg", "image/webp"],
-    limit: "100mb",
-  }),
-  (req, res) => {
+  async (req, res) => {
     const logoId = String(req.params.logoId || "").trim();
     if (!/^[a-f0-9-]{16,80}$/i.test(logoId)) {
       return res.status(400).json({ error: "Invalid logo upload reference." });
     }
-    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-      return res.status(400).json({ error: "Upload a PNG, JPEG, or WebP logo image." });
+
+    const contentType = String(req.headers["content-type"] || "").toLowerCase();
+    if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
+      return res.status(415).json({ error: "Use a PNG, JPEG, or WebP image." });
     }
-    if (req.body.length > 100 * 1024 * 1024) {
+
+    const maxBytes = 100 * 1024 * 1024;
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > maxBytes) {
       return res.status(413).json({ error: "Logo images must be 100 MB or smaller." });
     }
 
-    const buffer = req.body;
-    let extension = null;
-    if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
-      extension = ".png";
-    } else if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-      extension = ".jpg";
-    } else if (
-      buffer.length >= 12 &&
-      buffer.toString("ascii", 0, 4) === "RIFF" &&
-      buffer.toString("ascii", 8, 12) === "WEBP"
-    ) {
-      extension = ".webp";
-    }
-    if (!extension) {
-      return res.status(415).json({ error: "The file content is not a supported PNG, JPEG, or WebP image." });
-    }
-
     const logoDir = path.join(STORAGE_DIR || "", "tmp", "logos");
+    const tempPath = path.join(logoDir, logoId + ".uploading-" + WORKER_INSTANCE_ID);
+    let receivedBytes = 0;
+
     try {
       fs.mkdirSync(logoDir, { recursive: true });
+      const limiter = new Transform({
+        transform(chunk, encoding, callback) {
+          receivedBytes += chunk.length;
+          if (receivedBytes > maxBytes) {
+            callback(new Error("LOGO_TOO_LARGE"));
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+      const destination = fs.createWriteStream(tempPath, { flags: "wx" });
+
+      await new Promise((resolve, reject) => {
+        req.on("error", reject);
+        limiter.on("error", reject);
+        destination.on("error", reject);
+        destination.on("finish", resolve);
+        req.pipe(limiter).pipe(destination);
+      });
+
+      if (receivedBytes === 0) {
+        throw new Error("LOGO_EMPTY");
+      }
+
+      const signature = Buffer.alloc(12);
+      const fd = fs.openSync(tempPath, "r");
+      let bytesRead = 0;
+      try {
+        bytesRead = fs.readSync(fd, signature, 0, signature.length, 0);
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      let extension = null;
+      if (
+        bytesRead >= 8 &&
+        signature.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      ) {
+        extension = ".png";
+      } else if (
+        bytesRead >= 3 &&
+        signature[0] === 0xff &&
+        signature[1] === 0xd8 &&
+        signature[2] === 0xff
+      ) {
+        extension = ".jpg";
+      } else if (
+        bytesRead >= 12 &&
+        signature.toString("ascii", 0, 4) === "RIFF" &&
+        signature.toString("ascii", 8, 12) === "WEBP"
+      ) {
+        extension = ".webp";
+      }
+
+      if (!extension) {
+        throw new Error("LOGO_UNSUPPORTED");
+      }
+
       for (const ext of [".png", ".jpg", ".webp"]) {
         fs.rmSync(path.join(logoDir, logoId + ext), { force: true });
       }
-      fs.writeFileSync(path.join(logoDir, logoId + extension), buffer, { flag: "wx" });
-      return res.status(201).json({ ok: true, logoId });
+      fs.renameSync(tempPath, path.join(logoDir, logoId + extension));
+      return res.status(201).json({ ok: true, logoId, bytes: receivedBytes });
     } catch (error) {
-      console.error("[logo-upload] save failed:", error?.message || error);
+      try { fs.rmSync(tempPath, { force: true }); } catch {}
+      const message = String(error?.message || "");
+      if (message === "LOGO_TOO_LARGE") {
+        return res.status(413).json({ error: "Logo images must be 100 MB or smaller." });
+      }
+      if (message === "LOGO_EMPTY") {
+        return res.status(400).json({ error: "The image upload was empty." });
+      }
+      if (message === "LOGO_UNSUPPORTED") {
+        return res.status(415).json({ error: "The file content is not a supported PNG, JPEG, or WebP image." });
+      }
+      console.error("[logo-upload] save failed:", message || "unknown error");
       return res.status(500).json({ error: "Could not save the logo image." });
     }
   }
