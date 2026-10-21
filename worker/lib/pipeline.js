@@ -17,11 +17,11 @@ const BGM_VOLUME = 0.1;
 const DUCK_THRESHOLD = 0.03;
 const DUCK_RATIO = 3;
 
-// Render Free is CPU-limited, but allow a small, bounded encoder setting.
+// Render Free has only 512 MB RAM; use one encoder thread by default.
 const requestedFfmpegThreads = Number(process.env.FFMPEG_THREADS);
 const FFMPEG_THREADS = Number.isInteger(requestedFfmpegThreads)
-  ? Math.max(1, Math.min(3, requestedFfmpegThreads))
-  : 2;
+  ? Math.max(1, Math.min(2, requestedFfmpegThreads))
+  : 1;
 
 const COMMON_FFMPEG_OPTIONS = [
   "-threads", String(FFMPEG_THREADS),
