@@ -466,9 +466,28 @@ function buildFilterGraph(
       captionFilter +
       ",setsar=1,format=yuv420p[v]"
     );
+  } else if (framing === "fit-black") {
+    // Preserve the source aspect ratio and center it on a solid black 9:16 canvas.
+    // A 16:9 source becomes a full-width landscape frame with black above and below.
+    filters.push(
+      "[0:v]" +
+      "scale=w='trunc(iw*sar/2)*2':h=ih," +
+      "setsar=1," +
+      "scale=" + W + ":" + H +
+      ":force_original_aspect_ratio=decrease:force_divisible_by=2," +
+      "pad=" + W + ":" + H + ":(ow-iw)/2:(oh-ih)/2:color=black," +
+      "setsar=1[fg]"
+    );
+
+    filters.push(
+      "[fg]" +
+      "fade=t=in:st=0:d=0.4," +
+      captionFilter +
+      ",setsar=1,format=yuv420p[v]"
+    );
   } else {
-    // Fit means zoom and center-crop to fill the vertical canvas; never add bars
-    // or a blurred background. This fixed crop does not dynamically track faces.
+    // Fit frame means zoom and center-crop to fill the vertical canvas.
+    // This fixed crop does not dynamically track faces.
     filters.push(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
