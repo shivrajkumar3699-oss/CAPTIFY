@@ -798,6 +798,10 @@ async function buildEditedClip(
   const escapedAss =
     escapePathForFilter(assPath);
 
+  if (logoOptions && logoOptions.path) {
+    logoOptions.inputIndex = bgmPath ? 2 : 1;
+  }
+
   const filters =
     buildFilterGraph(
       {
