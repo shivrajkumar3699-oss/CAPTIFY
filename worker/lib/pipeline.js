@@ -580,7 +580,7 @@ function buildFilterGraph(
 
     filters.push(
       "[" + logoOptions.inputIndex + ":v]" +
-      "scale=" + logoWidth + ":-1:force_original_aspect_ratio=decrease[logo]"
+      "scale=" + logoWidth + ":-1[logo]"
     );
     filters.push(
       "[vbase][logo]overlay=x=" + x + ":y=" + y +
