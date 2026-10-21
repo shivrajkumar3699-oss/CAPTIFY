@@ -8,7 +8,8 @@ import path from "path";
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const MAX_TRANSCRIPTION_CHUNK_SECONDS = 300;
+const MAX_TRANSCRIPTION_CHUNK_SECONDS = 600;
+const TRANSCRIPTION_CONCURRENCY = 2;
 const TRANSCRIPTION_AUDIO_BITRATE = "48k";
 
 // A Roman-script Hinglish prompt. When passed to Whisper as "prompt",
@@ -75,16 +76,18 @@ async function transcribeOneFile(audioPath, language) {
     params.language = language;
   }
 
-  // Auto mode stays multilingual, but this context helps Whisper recognize
-  // Hindi-dubbed cartoon dialogue and discourages English music hallucinations.
-  params.prompt =
-    language === "hinglish"
-      ? HINGLISH_PROMPT
-      : "Oggy and the Cockroaches Hindi dubbed cartoon. " +
-        "Hindi dialogue may be mixed with background music. " +
-        "Character names: Oggy, Cockroaches. " +
-        "Examples of Hindi dialogue: chalo ab maza aayega, kya baat hai. " +
-        "Transcribe only speech that is actually audible; do not invent words for music.";
+  if (language === "hinglish") {
+    params.prompt = HINGLISH_PROMPT;
+  } else if (language !== "en") {
+    // Auto mode stays multilingual, but this context helps Whisper recognize
+    // Hindi-dubbed cartoon dialogue and discourages English music hallucinations.
+    params.prompt =
+      "Oggy and the Cockroaches Hindi dubbed cartoon. " +
+      "Hindi dialogue may be mixed with background music. " +
+      "Character names: Oggy, Cockroaches. " +
+      "Examples of Hindi dialogue: chalo ab maza aayega, kya baat hai. " +
+      "Transcribe only speech that is actually audible; do not invent words for music.";
+  }
 
   return groq.audio.transcriptions.create(params);
 }
@@ -139,10 +142,10 @@ export async function transcribeWithTimestamps(audioPath, language) {
     );
 
     console.log(
-      `[transcribe] duration=${duration.toFixed(1)}s chunks=${chunkCount} maxChunk=${MAX_TRANSCRIPTION_CHUNK_SECONDS}s`
+      `[transcribe] duration=${duration.toFixed(1)}s chunks=${chunkCount} maxChunk=${MAX_TRANSCRIPTION_CHUNK_SECONDS}s concurrency=${TRANSCRIPTION_CONCURRENCY}`
     );
 
-    for (let index = 0; index < chunkCount; index += 1) {
+    async function transcribeChunk(index) {
       const start = index * MAX_TRANSCRIPTION_CHUNK_SECONDS;
       const chunkDuration = Math.min(
         MAX_TRANSCRIPTION_CHUNK_SECONDS,
@@ -175,18 +178,34 @@ export async function transcribeWithTimestamps(audioPath, language) {
           adjusted.end = Number(adjusted.end) + start;
         }
         acceptedWords.push(adjusted);
-        allWords.push(adjusted);
       }
 
-      // Build hook-detection text from the same filtered words so hallucinated
-      // music lyrics don't influence hook selection either.
       const chunkText = acceptedWords
         .map((word) => String(word.word || "").trim())
         .filter(Boolean)
         .join(" ")
         .trim();
-      if (chunkText) transcriptParts.push(chunkText);
+
+      return { words: acceptedWords, text: chunkText };
     }
+
+    // Keep only two audio conversions/API requests in flight at once. This
+    // reduces serial waiting time without spawning a large CPU/memory burst
+    // on Render Free.
+    for (let batchStart = 0; batchStart < chunkCount; batchStart += TRANSCRIPTION_CONCURRENCY) {
+      const indexes = Array.from(
+        { length: Math.min(TRANSCRIPTION_CONCURRENCY, chunkCount - batchStart) },
+        (_, offset) => batchStart + offset
+      );
+      const results = await Promise.all(indexes.map(transcribeChunk));
+
+      for (const result of results) {
+        allWords.push(...result.words);
+        if (result.text) transcriptParts.push(result.text);
+      }
+    }
+
+    allWords.sort((a, b) => Number(a.start) - Number(b.start));
 
     return {
       text: transcriptParts.join(" ").trim(),
