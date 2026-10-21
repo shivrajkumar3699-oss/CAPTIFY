@@ -42,7 +42,7 @@ export async function PUT(req: NextRequest) {
     }
 
     const response = await fetch(
-      `${workerUrl.replace(/\\/+$/, "")}/upload-logo/${encodeURIComponent(logoId)}`,
+      `${workerUrl.replace(/\/+$/, "")}/upload-logo/${encodeURIComponent(logoId)}`,
       {
         method: "PUT",
         headers: {
