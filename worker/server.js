@@ -126,7 +126,7 @@ const BUILD_COMMIT =
   "unknown";
 
 const PIPELINE_VERSION =
-  "2026-10-single-pass-render-v2";
+  "2026-10-single-pass-logo-overlay-v3";
 
 const STATUS_DIR = path.join(
   STORAGE_DIR || "",
