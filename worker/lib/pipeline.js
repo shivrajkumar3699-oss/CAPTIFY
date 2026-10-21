@@ -23,6 +23,11 @@ const FFMPEG_THREADS = Number.isInteger(requestedFfmpegThreads)
   ? Math.max(1, Math.min(2, requestedFfmpegThreads))
   : 1;
 
+ // Experimental benchmark only: direct crop-before-scale removes the 1280px
+ // intermediate resize, but may increase peak memory for 4K sources. Disabled by default.
+const EXPERIMENTAL_DIRECT_CROP =
+  process.env.CAPTIFY_EXPERIMENTAL_DIRECT_CROP === "1";
+
 const COMMON_FFMPEG_OPTIONS = [
   "-threads", String(FFMPEG_THREADS),
   "-filter_threads", "1",
@@ -277,187 +282,15 @@ async function cutRawClip(
       ])
       .videoFilters(
         "scale=w='trunc(iw*sar/2)*2':h=ih,setsar=1," +
-        "scale='min(1280,iw)':'min(1280,ih)':" +
-        "force_original_aspect_ratio=decrease:force_divisible_by=2"
-      )
-      .videoCodec("libx264")
-      .audioCodec("aac")
-      .outputOptions([
-        "-map", "0:v:0?",
-        "-map", "0:a:0?",
-        ...COMMON_FFMPEG_OPTIONS,
-        "-x264-params", "rc-lookahead=0:ref=1:bframes=0",
-        "-crf", "20",
-        "-pix_fmt", "yuv420p",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        "-metadata:s:v:0", "rotate=0",
-        "-avoid_negative_ts", "make_zero",
-      ]);
-
-    command
-      .on("start", (commandLine) => {
-        console.log("[cutRawClip] FFmpeg command:");
-        console.log(commandLine);
-      })
-      .on("progress", (progress) => {
-        const percent = Number(progress && progress.percent);
-
-        if (Number.isFinite(percent)) {
-          onProgress?.(
-            Math.max(0, Math.min(100, percent))
-          );
-        }
-      })
-      .on("stderr", (line) => {
-        const text = String(line);
-
-        if (
-          /Error|Invalid|failed|Killed|Conversion failed/i.test(text)
-        ) {
-          console.error("[cutRawClip] " + text);
-        }
-      })
-      .on("error", (err, stdout, stderr) => {
-        console.error(
-          "[cutRawClip] FFmpeg ERROR:",
-          err && err.message ? err.message : err
-        );
-
-        if (stderr) {
-          console.error("[cutRawClip] FFmpeg STDERR:");
-          console.error(stderr);
-        }
-
-        reject(err);
-      })
-      .on("end", async () => {
-        try {
-          if (!fs.existsSync(outputPath)) {
-            throw new Error(
-              "FFmpeg finished but raw clip was not created"
-            );
-          }
-
-          const size = fs.statSync(outputPath).size;
-
-          if (!size) {
-            throw new Error(
-              "FFmpeg created an empty raw clip"
-            );
-          }
-
-          const normalizedInfo = await getVideoInfo(outputPath);
-
-          if (normalizedInfo.sampleAspectRatio !== "1:1") {
-            throw new Error(
-              "Normalized clip verification failed: expected SAR 1:1, got " +
-              normalizedInfo.sampleAspectRatio
-            );
-          }
-
-          console.log(
-            "[probe] normalized: " +
-            normalizedInfo.width +
-            "x" +
-            normalizedInfo.height +
-            " sar=" +
-            normalizedInfo.sampleAspectRatio +
-            " dar=" +
-            (normalizedInfo.displayAspectRatio || "unknown") +
-            " rot=" +
-            normalizedInfo.rotation
-          );
-
-          console.log(
-            "[cutRawClip] NORMALIZED clip: " +
-            normalizedInfo.width +
-            "x" +
-            normalizedInfo.height +
-            " sar=" +
-            normalizedInfo.sampleAspectRatio +
-            " rotation=" +
-            normalizedInfo.rotation
-          );
-
-          resolve(outputPath);
-        } catch (error) {
-          reject(error);
-        }
-      })
-      .save(outputPath);
-  });
-}
-
-async function normalizeClipForRender(
-  sourcePath,
-  outputPath,
-  info
-) {
-  const duration = await getVideoDuration(sourcePath);
-
-  return cutRawClip(
-    sourcePath,
-    0,
-    duration,
-    outputPath
-  );
-}
-
-// ------------------------------------------------------------
-// ASS path escaping
-// ------------------------------------------------------------
-
-function escapePathForFilter(filePath) {
-  if (!filePath) {
-    throw new Error("ASS subtitle path is required");
-  }
-
-  return String(filePath)
-    .replace(/\\/g, "/")
-    .replace(/:/g, "\\:")
-    .replace(/'/g, "\\'");
-}
-
-// ------------------------------------------------------------
-// Filter graph
-// ------------------------------------------------------------
-
-function buildFilterGraph(
-  info,
-  framing,
-  escapedAss,
-  hasBgm,
-  clipDuration
-) {
-  const W = VIDEO_WIDTH;
-  const H = VIDEO_HEIGHT;
-
-  const captionFilter =
-    "ass='" +
-    escapedAss +
-    "':original_size=" +
-    W +
-    "x" +
-    H +
-    ":shaping=complex:fontsdir='" +
-    escapePathForFilter(CAPTION_FONT_DIR) +
-    "'";
-
-  const filters = [];
-
-  if (framing === "fill") {
-    filters.push(
-      "[0:v]" +
-      "scale=w='trunc(iw*sar/2)*2':h=ih," +
-      "setsar=1,scale='min(1280,iw)':'min(1280,ih)':" +
-      "force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      // Crop to the target 9:16 aspect ratio before upscaling. This avoids
-      // creating a ~3414x1920 intermediate frame from a 16:9 source.
-      "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
-      "h='trunc(min(ih,iw*16/9)/2)*2':" +
-      "x='(iw-ow)/2':y='(ih-oh)/2'," +
-      "scale=" + W + ":" + H + ",setsar=1[fg]"
+        (EXPERIMENTAL_DIRECT_CROP
+          ? "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+            "h='trunc(min(ih,iw*16/9)/2)*2':" +
+            "x='(iw-ow)/2':y='(ih-oh)/2',scale=" + W + ":" + H + ","
+          : "scale='min(1280,iw)':'min(1280,ih)':" +
+            "force_original_aspect_ratio=decrease:force_divisible_by=2," +
+            "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+            "h='trunc(min(ih,iw*16/9)/2)*2':" +
+            "x='(iw-ow)/2':y='(ih-oh)/2',scale=" + W + ":" + H + ",")
     );
 
     filters.push(
@@ -492,13 +325,15 @@ function buildFilterGraph(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
       "setsar=1," +
-      "scale='min(1280,iw)':'min(1280,ih)':" +
-      "force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      // Crop to 9:16 before scaling to the final output size to reduce peak memory.
-      "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
-      "h='trunc(min(ih,iw*16/9)/2)*2':" +
-      "x='(iw-ow)/2':y='(ih-oh)/2'," +
-      "scale=" + W + ":" + H + ",setsar=1[fg]"
+      (EXPERIMENTAL_DIRECT_CROP
+        ? "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+          "h='trunc(min(ih,iw*16/9)/2)*2':" +
+          "x='(iw-ow)/2':y='(ih-oh)/2',scale=" + W + ":" + H + ","
+        : "scale='min(1280,iw)':'min(1280,ih)':" +
+          "force_original_aspect_ratio=decrease:force_divisible_by=2," +
+          "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+          "h='trunc(min(ih,iw*16/9)/2)*2':" +
+          "x='(iw-ow)/2':y='(ih-oh)/2',scale=" + W + ":" + H + ",")
     );
 
     filters.push(
