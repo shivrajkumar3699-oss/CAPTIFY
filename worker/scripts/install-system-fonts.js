@@ -1,31 +1,49 @@
-const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
 if (process.platform !== "linux") {
   process.exit(0);
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, {
-    stdio: "inherit",
-    windowsHide: true,
-  });
+const FONT_DIR = path.join(__dirname, "..", "assets", "fonts");
+const FONT_FILES = [
+  "NotoSansDevanagari-Regular.ttf",
+  "NotoSansDevanagari-Bold.ttf",
+];
+const BASE_URL =
+  "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSansDevanagari/";
 
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
+async function main() {
+  fs.mkdirSync(FONT_DIR, { recursive: true });
+
+  for (const filename of FONT_FILES) {
+    const destination = path.join(FONT_DIR, filename);
+    if (fs.existsSync(destination) && fs.statSync(destination).size > 100_000) {
+      continue;
+    }
+
+    console.log("[fonts] Downloading bundled caption font:", filename);
+    const response = await fetch(BASE_URL + filename, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      throw new Error("Font download failed for " + filename + " (HTTP " + response.status + ")");
+    }
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length < 100_000) {
+      throw new Error("Downloaded font file is unexpectedly small: " + filename);
+    }
+
+    fs.writeFileSync(destination, bytes);
   }
+
+  console.log("[fonts] Bundled Noto Sans Devanagari fonts are ready.");
 }
 
-try {
-  // Render's Linux worker must have actual Devanagari TTF/OTF fonts installed.
-  // Windows-only font names silently render Hindi as empty tofu rectangles.
-  run("sh", [
-    "-lc",
-    "if command -v fc-match >/dev/null 2>&1 && fc-match 'Noto Sans Devanagari' | grep -qi 'Noto Sans Devanagari'; then exit 0; else apt-get update && apt-get install -y --no-install-recommends fontconfig fonts-noto-core && fc-cache -f; fi",
-  ]);
-} catch (error) {
-  // Do not take the whole worker offline if the base image disallows apt.
-  // The deployment logs will make this explicit so the font setup can be fixed.
-  console.error("[fonts] WARNING: could not install Noto Sans Devanagari fonts:", error.message);
-  process.exit(0);
-}
+main().catch((error) => {
+  console.error("[fonts] Required caption fonts could not be prepared:", error.message);
+  process.exit(1);
+});
