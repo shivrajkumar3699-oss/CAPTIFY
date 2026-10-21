@@ -452,16 +452,12 @@ function buildFilterGraph(
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
       "setsar=1,scale='min(1280,iw)':'min(1280,ih)':" +
       "force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      "scale=" +
-      W +
-      ":" +
-      H +
-      ":force_original_aspect_ratio=increase," +
-      "crop=" +
-      W +
-      ":" +
-      H +
-      ":(iw-ow)/2:(ih-oh)/2[fg]"
+      // Crop to the target 9:16 aspect ratio before upscaling. This avoids
+      // creating a ~3414x1920 intermediate frame from a 16:9 source.
+      "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+      "h='trunc(min(ih,iw*16/9)/2)*2':" +
+      "x='(iw-ow)/2':y='(ih-oh)/2'," +
+      "scale=" + W + ":" + H + ",setsar=1[fg]"
     );
 
     filters.push(
@@ -479,10 +475,11 @@ function buildFilterGraph(
       "setsar=1," +
       "scale='min(1280,iw)':'min(1280,ih)':" +
       "force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      "scale=" + W + ":" + H +
-      ":force_original_aspect_ratio=increase," +
-      "crop=" + W + ":" + H + ":(iw-ow)/2:(ih-oh)/2," +
-      "setsar=1[fg]"
+      // Crop to 9:16 before scaling to the final output size to reduce peak memory.
+      "crop=w='trunc(min(iw,ih*9/16)/2)*2':" +
+      "h='trunc(min(ih,iw*16/9)/2)*2':" +
+      "x='(iw-ow)/2':y='(ih-oh)/2'," +
+      "scale=" + W + ":" + H + ",setsar=1[fg]"
     );
 
     filters.push(
