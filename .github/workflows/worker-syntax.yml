@@ -1,0 +1,29 @@
+name: CAPTIFY worker syntax
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - feature/ai-video-director-gemini-rotation
+      - perf/ffmpeg-render-benchmark
+
+permissions:
+  contents: read
+
+jobs:
+  worker-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check worker JavaScript syntax
+        run: |
+          node --check worker/server.js
+          node --check worker/lib/pipeline.js
+          node --check worker/lib/detectHooks.js
+          node --check worker/lib/aiEdit.js
