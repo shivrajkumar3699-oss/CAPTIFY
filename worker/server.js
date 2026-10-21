@@ -2310,8 +2310,33 @@ app.put(
       for (const ext of [".png", ".jpg", ".webp"]) {
         fs.rmSync(path.join(logoDir, logoId + ext), { force: true });
       }
-      fs.renameSync(tempPath, path.join(logoDir, logoId + extension));
-      return res.status(201).json({ ok: true, logoId, bytes: receivedBytes });
+      const finalPath = path.join(logoDir, logoId + extension);
+      fs.renameSync(tempPath, finalPath);
+
+      let imageInfo;
+      try {
+        imageInfo = await getVideoInfo(finalPath);
+      } catch {
+        fs.rmSync(finalPath, { force: true });
+        return res.status(415).json({ error: "The uploaded file is not a readable image." });
+      }
+
+      if (
+        imageInfo.width > 8192 ||
+        imageInfo.height > 8192 ||
+        imageInfo.width * imageInfo.height > 40000000
+      ) {
+        fs.rmSync(finalPath, { force: true });
+        return res.status(413).json({ error: "Logo dimensions are too large. Use an image no larger than 8192px per side or 40 megapixels." });
+      }
+
+      return res.status(201).json({
+        ok: true,
+        logoId,
+        bytes: receivedBytes,
+        width: imageInfo.width,
+        height: imageInfo.height,
+      });
     } catch (error) {
       try { fs.rmSync(tempPath, { force: true }); } catch {}
       const message = String(error?.message || "");
