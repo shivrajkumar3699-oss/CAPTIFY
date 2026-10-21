@@ -93,11 +93,26 @@ export default function VideoEditChat({
     setLogoName("");
     try {
       const id = crypto.randomUUID();
-      const response = await fetch("/api/logo-upload", {
+      const ticketResponse = await fetch("/api/logo-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          logoId: id,
+          contentType: file.type,
+          size: file.size,
+        }),
+      });
+      const ticket = await ticketResponse.json().catch(() => ({}));
+      if (!ticketResponse.ok) throw new Error(ticket.error || "Could not prepare the logo upload.");
+      if (typeof ticket.uploadUrl !== "string" || typeof ticket.uploadToken !== "string") {
+        throw new Error("The secure upload link was invalid. Please try again.");
+      }
+
+      const response = await fetch(ticket.uploadUrl, {
         method: "PUT",
         headers: {
           "Content-Type": file.type,
-          "x-logo-id": id,
+          "x-logo-upload-token": ticket.uploadToken,
         },
         body: file,
       });
