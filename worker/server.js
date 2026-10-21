@@ -68,6 +68,57 @@ const ALLOWED_EXTENSIONS = new Set([
 const activeJobStatuses = new Map();
 const activeSmartRenders = new Set();
 
+// Render Free has very limited CPU/RAM. Keep selected-clip renders
+// serialized so simultaneous users/jobs cannot spawn multiple heavy FFmpeg
+// encoders and cause the worker process to be restarted.
+const smartRenderQueue = [];
+let smartRenderRunning = false;
+
+function drainSmartRenderQueue() {
+  if (smartRenderRunning) return;
+
+  const job = smartRenderQueue.shift();
+  if (!job) return;
+
+  smartRenderRunning = true;
+  console.log(
+    `[${job.jobId}] Starting queued render; waiting jobs=${smartRenderQueue.length}`
+  );
+
+  (async () => {
+    try {
+      await runSmartRender(
+        job.jobId,
+        job.segments,
+        job.metadata,
+        job.options,
+        job.callbackStatusUrl
+      );
+    } catch (err) {
+      console.error(
+        `[${job.jobId}] Smart render crashed:`,
+        err
+      );
+
+      await pushStatus(
+        job.jobId,
+        {
+          status: "error",
+          progress: 0,
+          message: "Rendering failed",
+          error: err?.message || "Unknown rendering error",
+        },
+        job.callbackStatusUrl
+      );
+    } finally {
+      activeSmartRenders.delete(job.jobId);
+      smartRenderRunning = false;
+      // Yield before starting the next job, letting Node flush callbacks/logs.
+      setImmediate(drainSmartRenderQueue);
+    }
+  })();
+}
+
 const BUILD_COMMIT =
   process.env.RENDER_GIT_COMMIT ||
   process.env.RENDER_GIT_COMMIT_SHA ||
@@ -1518,36 +1569,31 @@ app.post(
 
     activeSmartRenders.add(cleanJobId);
 
-    runSmartRender(
-      cleanJobId,
+    smartRenderQueue.push({
+      jobId: cleanJobId,
       segments,
       metadata,
-      options || metadata.options || {},
-      callbackStatusUrl
-    ).catch(
-      async (err) => {
-        console.error(
-          `[${cleanJobId}] Smart render crashed:`,
-          err
-        );
-
-        await pushStatus(
-          cleanJobId,
-          {
-            status: "error",
-            progress: 0,
-            message:
-              "Rendering failed",
-            error:
-              err?.message ||
-              "Unknown rendering error",
-          },
-          callbackStatusUrl
-        );
-      }
-    ).finally(() => {
-      activeSmartRenders.delete(cleanJobId);
+      options: options || metadata.options || {},
+      callbackStatusUrl,
     });
+
+    console.log(
+      `[${cleanJobId}] Render queued; waiting jobs=${smartRenderQueue.length - (smartRenderRunning ? 0 : 1)}`
+    );
+
+    void pushStatus(
+      cleanJobId,
+      {
+        status: "queued",
+        progress: 0,
+        message: smartRenderRunning
+          ? "Waiting for another render to finish"
+          : "Starting render",
+      },
+      callbackStatusUrl
+    );
+
+    drainSmartRenderQueue();
   }
 );
 
