@@ -571,9 +571,11 @@ function buildFilterGraph(
     );
     const margin = Math.round(W * 0.035);
     const position = logoOptions.position || "top-right";
-    const x = position.endsWith("left")
-      ? String(margin)
-      : "W-w-" + margin;
+    const x = position.endsWith("center")
+      ? "(W-w)/2"
+      : position.endsWith("left")
+        ? String(margin)
+        : "W-w-" + margin;
     const y = position.startsWith("top")
       ? String(margin)
       : "H-h-" + margin;
