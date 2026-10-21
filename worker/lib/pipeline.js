@@ -468,9 +468,10 @@ function buildFilterGraph(
       ",setsar=1,format=yuv420p[v]"
     );
   } else {
-    // "Fit" preserves the complete source frame. Do not create a blurred,
-    // enlarged duplicate behind a landscape video; use clean black letterbox
-    // space instead. This also removes several expensive scaling/blur passes.
+    // "Fit" uses a center crop to fill the entire 9:16 canvas. Landscape
+    // sources are zoomed in and cropped equally from the left and right;
+    // portrait sources stay close to their original framing. No bars or
+    // blurred background are added. This is center-crop, not AI subject tracking.
     filters.push(
       "[0:v]" +
       "scale=w='trunc(iw*sar/2)*2':h=ih," +
@@ -478,8 +479,8 @@ function buildFilterGraph(
       "scale='min(1280,iw)':'min(1280,ih)':" +
       "force_original_aspect_ratio=decrease:force_divisible_by=2," +
       "scale=" + W + ":" + H +
-      ":force_original_aspect_ratio=decrease:force_divisible_by=2," +
-      "pad=" + W + ":" + H + ":(ow-iw)/2:(oh-ih)/2:color=black," +
+      ":force_original_aspect_ratio=increase," +
+      "crop=" + W + ":" + H + ":(iw-ow)/2:(ih-oh)/2," +
       "setsar=1[fg]"
     );
 
