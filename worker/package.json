@@ -1,9 +1,10 @@
-﻿{
+{
   "name": "captify-worker",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "node scripts/install-system-fonts.js"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",
