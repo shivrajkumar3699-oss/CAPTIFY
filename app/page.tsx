@@ -7,6 +7,8 @@ import {
   useState,
 } from "react";
 
+import VideoEditChat from "@/app/components/VideoEditChat";
+
 import {
   extractSpeechAudio,
   getMediaDuration,
@@ -431,6 +433,10 @@ export default function Home() {
   const [videoLanguage, setVideoLanguage] = useState("auto");
   const [captionLanguage, setCaptionLanguage] = useState("same");
   const [captionColor, setCaptionColor] = useState("#F7D002");
+  const applyAiEdits = (edits: { framing: "fill" | "fit" | "fit-black" | null; captionColor: string | null }) => {
+    if (edits.framing) setFraming(edits.framing);
+    if (edits.captionColor) setCaptionColor(edits.captionColor);
+  };
 
   // ONLY 1-7 CLIPS.
   // Default = 6.
@@ -3207,6 +3213,8 @@ ${timeRange(
               </div>
             </section>
           )}
+
+        <VideoEditChat onApply={applyAiEdits} />
 
         {/* Error */}
         {status?.status ===
