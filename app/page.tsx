@@ -437,7 +437,7 @@ export default function Home() {
   const [numClips, setNumClips] = useState(6);
 
   const [bgm, setBgm] = useState(true);
-  const [framing, setFraming] = useState<"fill" | "fit">("fill");
+  const [framing, setFraming] = useState<"fill" | "fit" | "fit-black">("fill");
 
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadSpeed, setUploadSpeed] = useState(0);
@@ -2585,6 +2585,7 @@ ${timeRange(
                         value as
                           | "fill"
                           | "fit"
+                          | "fit-black"
                       )
                     }
                     options={[
@@ -2595,6 +2596,10 @@ ${timeRange(
                       {
                         name: "Fit frame",
                         value: "fit",
+                      },
+                      {
+                        name: "Fit Black",
+                        value: "fit-black",
                       },
                     ]}
                     disabled={isProcessing}
