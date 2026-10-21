@@ -458,6 +458,7 @@ export default function Home() {
   const [copied, setCopied] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showLocalConsent, setShowLocalConsent] = useState(false);
   const cancelRequestedRef = useRef(false);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -2746,7 +2747,7 @@ ${timeRange(
                 {!isDone && (
                   <button
                     type="button"
-                    onClick={handleStart}
+                    onClick={() => setShowLocalConsent(true)}
                     disabled={
                       !file || isProcessing
                     }
@@ -3318,6 +3319,49 @@ ${timeRange(
           </div>
         </footer>
       </div>
+        {showLocalConsent && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="local-processing-title"
+          >
+            <section className="w-full max-w-lg rounded-[28px] border border-white/10 bg-[#101010] p-6 shadow-2xl sm:p-8">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[#F7D002]/20 bg-[#F7D002]/10 text-[#F7D002]">
+                <Icon name="shield" size={22} />
+              </div>
+              <h2 id="local-processing-title" className="mt-5 text-xl font-black">
+                Allow local device processing?
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-white/60">
+                CAPTIFY will use your browser and this device’s CPU/RAM to read the selected video and extract speech audio. This may make your device busy while preparation runs.
+              </p>
+              <div className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4 text-xs leading-5 text-white/45">
+                Your original video is not uploaded for analysis; extracted speech audio is sent to CAPTIFY’s worker. Final caption rendering and encoding still run on the cloud worker, so this permission alone does not move the final render onto your PC.
+              </div>
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowLocalConsent(false)}
+                  className="rounded-full border border-white/10 px-5 py-3 text-sm font-bold text-white/60 transition hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLocalConsent(false);
+                    void handleStart();
+                  }}
+                  className="rounded-full bg-[#F7D002] px-5 py-3 text-sm font-black text-black transition hover:bg-[#ffe04a]"
+                >
+                  Allow & Continue
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
     </main>
   );
 }
