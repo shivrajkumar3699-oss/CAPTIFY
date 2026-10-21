@@ -2170,6 +2170,25 @@ app.get(
 );
 
 // ------------------------------------------------------------
+// AI VIDEO DIRECTOR — short, structured editing instructions
+// ------------------------------------------------------------
+
+const { interpretVideoEditRequest } = require("./lib/aiEdit");
+
+app.post("/ai-edit", checkSecret, async (req, res) => {
+  try {
+    const message = typeof req.body?.message === "string" ? req.body.message : "";
+    const result = await interpretVideoEditRequest(message);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    const message = String(error?.message || "Could not interpret the edit request.");
+    const status = /1–2000 characters/.test(message) ? 400 : 502;
+    console.error("[ai-edit] request failed:", message);
+    return res.status(status).json({ error: status === 400 ? message : "AI editing helper is temporarily unavailable." });
+  }
+});
+
+// ------------------------------------------------------------
 // HEALTH CHECK
 // ------------------------------------------------------------
 
