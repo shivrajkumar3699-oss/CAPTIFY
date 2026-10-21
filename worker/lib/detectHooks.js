@@ -1,14 +1,21 @@
 const { GoogleGenAI } = require("@google/genai");
 
-const apiKey = process.env.GEMINI_API_KEY;
+const apiKeys = [
+  process.env.GEMINI_API_KEY,
+  process.env.GEMINI_API_KEY_2 || process.env.GEMINI_API_KEY2,
+].filter((key, index, all) => Boolean(key) && all.indexOf(key) === index);
 
-if (!apiKey) {
+if (apiKeys.length === 0) {
   throw new Error("GEMINI_API_KEY is missing from worker environment.");
 }
 
-const ai = new GoogleGenAI({
-  apiKey,
-});
+// Alternate eligible Gemini requests between configured keys. Never log key values.
+let nextApiKeyIndex = 0;
+function getNextGeminiClient() {
+  const apiKey = apiKeys[nextApiKeyIndex % apiKeys.length];
+  nextApiKeyIndex += 1;
+  return new GoogleGenAI({ apiKey });
+}
 
 function extractJson(text) {
   if (typeof text !== "string") {
@@ -440,7 +447,7 @@ ${transcript}
       );
 
       const response =
-        await ai.models.generateContent({
+        await getNextGeminiClient().models.generateContent({
           model,
           contents: prompt,
           config: {
