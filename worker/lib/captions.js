@@ -11,11 +11,11 @@ const PAUSE_BREAK_SECONDS = 0.6; // a pause this long starts a new line
 const HOLD_AFTER_LAST_WORD = 0.25; // keep the last word on screen a moment longer
 
 // ---- Fonts ----
-// Arial Black looks great for Latin text but has NO Devanagari glyphs
-// (Hindi words came out blank). Nirmala UI is on every Windows PC and
-// covers both Devanagari AND Latin, so we auto-switch when needed.
+// The worker runs on Linux, not Windows. Nirmala UI is a Windows-only font
+// and Render logs confirmed it had no Devanagari glyph fallback. Install
+// fonts-noto-core during worker build and use its Linux font family here.
 const FONT_LATIN = "Arial Black";
-const FONT_DEVANAGARI = "Nirmala UI"; // if Hindi still comes out blank, try "Mangal" here
+const FONT_DEVANAGARI = "Noto Sans Devanagari";
 
 // Converts a hex color like "#FFD700" into the 6-char BGR hex string
 // that ASS/SSA subtitle format uses internally.
@@ -176,7 +176,12 @@ function cleanWords(rawWords) {
       end: Number(w.end),
       idx: idx,
     }))
-    .filter((w) => w.word.length > 0 && isFinite(w.start) && isFinite(w.end))
+    .filter((w) =>
+      normalizeWord(w.word).length > 0 &&
+      !/[\uFFFD\u25A1\u25AF\u25AB\u25A0]/u.test(w.word) &&
+      isFinite(w.start) &&
+      isFinite(w.end)
+    )
     .sort((a, b) => a.start - b.start || a.idx - b.idx);
 
 const out = [];
