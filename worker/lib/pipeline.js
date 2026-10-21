@@ -2,6 +2,7 @@
 
 const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs");
+const path = require("path");
 const ffmpegPath = require("ffmpeg-static");
 
 if (ffmpegPath) {
@@ -10,6 +11,7 @@ if (ffmpegPath) {
 
 const VIDEO_WIDTH = Number(process.env.OUT_W) || 1080;
 const VIDEO_HEIGHT = Number(process.env.OUT_H) || 1920;
+const CAPTION_FONT_DIR = path.join(__dirname, "..", "assets", "fonts");
 
 const BGM_VOLUME = 0.1;
 const DUCK_THRESHOLD = 0.03;
@@ -438,7 +440,9 @@ function buildFilterGraph(
     W +
     "x" +
     H +
-    ":shaping=complex";
+    ":shaping=complex:fontsdir='" +
+    escapePathForFilter(CAPTION_FONT_DIR) +
+    "'";
 
   const filters = [];
 
