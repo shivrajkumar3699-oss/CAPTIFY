@@ -23,8 +23,10 @@ const LOGO_MAX_BYTES = 100 * 1024 * 1024;
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const LOGO_POSITIONS = [
   { label: "Top right", value: "top-right" },
+  { label: "Top center", value: "top-center" },
   { label: "Top left", value: "top-left" },
   { label: "Bottom right", value: "bottom-right" },
+  { label: "Bottom center", value: "bottom-center" },
   { label: "Bottom left", value: "bottom-left" },
 ];
 
