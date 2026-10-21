@@ -832,7 +832,10 @@ export default function Home() {
           // Update this clip immediately; don't wait for the remaining clips.
           if (previewUrl) {
             setStatus((current) => {
-              if (!current) {
+              if (
+                !current ||
+                !clip.editedUrl.includes(`/api/download/${current.jobId}/`)
+              ) {
                 return current;
               }
               return {
