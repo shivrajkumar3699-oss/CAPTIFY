@@ -799,6 +799,20 @@ async function buildEditedClip(
   console.log(filters.join(";"));
 
   return new Promise((resolve, reject) => {
+    const renderStartedAt = Date.now();
+    const clipLabel = String(outputPath).split(/[\\/]/).pop() || "unknown-clip";
+    let lastMetricsLogAt = renderStartedAt;
+    let latestFfmpegTime = "unknown";
+    let latestFfmpegSpeed = "unknown";
+    let latestFfmpegFps = "unknown";
+    let latestFfmpegFrame = "unknown";
+
+    console.log(
+      "[render-metrics] start clip=" + clipLabel +
+      " target=" + VIDEO_WIDTH + "x" + VIDEO_HEIGHT +
+      " duration=" + Number(clipDuration).toFixed(2) + "s"
+    );
+
     const command = ffmpeg(rawClipPath);
 
     if (bgmPath) {
@@ -851,6 +865,31 @@ async function buildEditedClip(
       })
       .on("stderr", (line) => {
         const text = String(line);
+        const now = Date.now();
+        const elapsedSeconds = ((now - renderStartedAt) / 1000).toFixed(1);
+        const timeMatch = text.match(/time=\\s*(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)/);
+        const speedMatch = text.match(/speed=\\s*([0-9.]+)x/);
+        const fpsMatch = text.match(/fps=\\s*([0-9.]+)/);
+        const frameMatch = text.match(/frame=\\s*(\\d+)/);
+
+        if (timeMatch) latestFfmpegTime = timeMatch[1];
+        if (speedMatch) latestFfmpegSpeed = speedMatch[1] + "x";
+        if (fpsMatch) latestFfmpegFps = fpsMatch[1];
+        if (frameMatch) latestFfmpegFrame = frameMatch[1];
+
+        // FFmpeg progress lines are useful for diagnosis but can be very noisy.
+        // Emit a compact snapshot at most once every 10 seconds.
+        if (now - lastMetricsLogAt >= 10000 && /(?:time=|speed=|frame=)/.test(text)) {
+          console.log(
+            "[render-metrics] progress clip=" + clipLabel +
+            " elapsed=" + elapsedSeconds + "s" +
+            " outputTime=" + latestFfmpegTime +
+            " speed=" + latestFfmpegSpeed +
+            " fps=" + latestFfmpegFps +
+            " frame=" + latestFfmpegFrame
+          );
+          lastMetricsLogAt = now;
+        }
 
         if (
           /Error|Invalid|failed|Killed|Conversion failed/i.test(text)
@@ -859,6 +898,20 @@ async function buildEditedClip(
         }
       })
       .on("end", async () => {
+        const ffmpegElapsedSeconds = (Date.now() - renderStartedAt) / 1000;
+        const clipSeconds = Math.max(0, Number(clipDuration) || 0);
+        const effectiveSpeed = ffmpegElapsedSeconds > 0
+          ? (clipSeconds / ffmpegElapsedSeconds).toFixed(3)
+          : "unknown";
+
+        console.log(
+          "[render-metrics] ffmpeg-finished clip=" + clipLabel +
+          " elapsed=" + ffmpegElapsedSeconds.toFixed(1) + "s" +
+          " outputDuration=" + clipSeconds.toFixed(2) + "s" +
+          " effectiveSpeed=" + effectiveSpeed + "x" +
+          " lastFfmpegSpeed=" + latestFfmpegSpeed
+        );
+
         try {
           if (!fs.existsSync(outputPath)) {
             throw new Error(
@@ -895,6 +948,10 @@ async function buildEditedClip(
         }
       })
       .on("error", (err, stdout, stderr) => {
+        console.error(
+          "[render-metrics] ffmpeg-error clip=" + clipLabel +
+          " elapsed=" + ((Date.now() - renderStartedAt) / 1000).toFixed(1) + "s"
+        );
         console.error(
           "[buildEditedClip] FFmpeg ERROR:",
           err && err.message ? err.message : err
