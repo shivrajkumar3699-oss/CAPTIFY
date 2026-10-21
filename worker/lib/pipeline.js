@@ -11,12 +11,19 @@ if (ffmpegPath) {
 const VIDEO_WIDTH = Number(process.env.OUT_W) || 1080;
 const VIDEO_HEIGHT = Number(process.env.OUT_H) || 1920;
 
+// Keep Render Free conservative by default; allow a local worker to opt into
+// more encoder threads. Clamp to 1-4 to avoid unbounded memory/CPU fan-out.
+const requestedFfmpegThreads = Number(process.env.FFMPEG_THREADS);
+const FFMPEG_THREADS = Number.isInteger(requestedFfmpegThreads)
+  ? Math.max(1, Math.min(4, requestedFfmpegThreads))
+  : 1;
+
 const BGM_VOLUME = 0.1;
 const DUCK_THRESHOLD = 0.03;
 const DUCK_RATIO = 3;
 
 const COMMON_FFMPEG_OPTIONS = [
-  "-threads", "1",
+  "-threads", String(FFMPEG_THREADS),
   "-filter_threads", "1",
   "-filter_complex_threads", "1",
   "-preset", "ultrafast",
@@ -833,7 +840,7 @@ async function buildEditedClip(
       .complexFilter(filters)
       .outputOptions([
         ...maps,
-        "-threads", "1",
+        "-threads", String(FFMPEG_THREADS),
         "-filter_threads", "1",
         "-filter_complex_threads", "1",
         "-preset", "ultrafast",
