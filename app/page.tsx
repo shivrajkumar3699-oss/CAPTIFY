@@ -7,8 +7,6 @@ import {
   useState,
 } from "react";
 
-import VideoEditChat from "@/app/components/VideoEditChat";
-
 import {
   extractSpeechAudio,
   getMediaDuration,
@@ -433,25 +431,6 @@ export default function Home() {
   const [videoLanguage, setVideoLanguage] = useState("auto");
   const [captionLanguage, setCaptionLanguage] = useState("same");
   const [captionColor, setCaptionColor] = useState("#F7D002");
-  const [logoId, setLogoId] = useState<string | null>(null);
-  const [logoPosition, setLogoPosition] = useState<string | null>(null);
-  const [logoSize, setLogoSize] = useState<string | null>(null);
-  const applyAiEdits = (edits: {
-    framing: "fill" | "fit" | "fit-black" | null;
-    captionColor: string | null;
-    logoId: string | null;
-    logoPosition: string | null;
-    logoSize: string | null;
-  }) => {
-    if (edits.framing) setFraming(edits.framing);
-    if (edits.captionColor) setCaptionColor(edits.captionColor);
-    if (edits.logoId) {
-      setLogoId(edits.logoId);
-      setLogoPosition(edits.logoPosition || "top-right");
-      setLogoSize(edits.logoSize || "small");
-    }
-  };
-
   // ONLY 1-7 CLIPS.
   // Default = 6.
   const [numClips, setNumClips] = useState(6);
@@ -1622,9 +1601,6 @@ export default function Home() {
                   videoLanguage,
                 captionLanguage,
                 framing,
-                logoId,
-                logoPosition,
-                logoSize,
               },
             }),
           }
@@ -1867,9 +1843,6 @@ export default function Home() {
                   videoLanguage,
                 captionLanguage,
                 framing,
-                logoId,
-                logoPosition,
-                logoSize,
               },
             }),
           }
@@ -3233,8 +3206,6 @@ ${timeRange(
               </div>
             </section>
           )}
-
-        <VideoEditChat onApply={applyAiEdits} />
 
         {/* Error */}
         {status?.status ===
