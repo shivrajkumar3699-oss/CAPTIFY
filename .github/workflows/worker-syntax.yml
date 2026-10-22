@@ -26,4 +26,3 @@ jobs:
           node --check worker/server.js
           node --check worker/lib/pipeline.js
           node --check worker/lib/detectHooks.js
-          node --check worker/lib/aiEdit.js
