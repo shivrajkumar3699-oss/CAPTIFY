@@ -5,8 +5,6 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const { Transform } = require("stream");
-const crypto = require("crypto");
 
 const {
   transcribeWithTimestamps,
@@ -127,7 +125,7 @@ const BUILD_COMMIT =
   "unknown";
 
 const PIPELINE_VERSION =
-  "2026-10-single-pass-logo-overlay-v3";
+  "2026-10-standard-caption-render-v1";
 
 const STATUS_DIR = path.join(
   STORAGE_DIR || "",
