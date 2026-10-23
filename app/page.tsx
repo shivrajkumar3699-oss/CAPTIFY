@@ -804,6 +804,10 @@ export default function Home() {
 
   const cacheGeneratedClips = useCallback(
     (clips: ClipResult[]) => {
+      // Local clips are already available through the custom protocol. Do not
+      // copy every MP4 into renderer memory on desktop; play from local files.
+      if (window.captifyDesktop?.isDesktop) return Promise.resolve(clips);
+
       const task = clipCacheQueueRef.current.then(async () => {
         const cached: ClipResult[] = [];
 
