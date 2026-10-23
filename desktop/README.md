@@ -27,6 +27,7 @@ The NSIS installer is created under desktop/dist.
 - Only extracted analysis audio and selected hook clips are sent to the local worker; the original long video is not uploaded to the CAPTIFY server by this flow.
 - Render status is polled locally and clip downloads use a custom local protocol.
 - API keys are encrypted with Electron safeStorage and written under the app's user-data directory.
+- Finished clips and worker storage live under the current Windows user's Videos/CAPTIFY folder. Use CAPTIFY → Open Output Folder to find them.
 
 ## Important limitations
 
