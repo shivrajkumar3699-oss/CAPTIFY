@@ -43,13 +43,27 @@ function createFallbackHooks(words,numClips,videoDuration,signalOptions) {
   const visuals=Array.isArray(signalOptions&&signalOptions.visualEvents)?signalOptions.visualEvents.slice(0,24):[], audioEvents=Array.isArray(signalOptions&&signalOptions.audioEvents)?signalOptions.audioEvents.slice(0,80):[], pauseEvents=pauses(all), map=new Map();
   const lengths=[15,22,30,40,52].filter((n)=>n<=endTime-startTime);if(!lengths.length)lengths.push(Math.min(10,endTime-startTime));
   const step=Math.max(2.5,Math.min(8,(endTime-startTime)/100));
-  for(let start=startTime;start<=endTime-10;start+=step){for(const length of lengths){
-    const limit=Math.min(endTime,start+length), first=all.find((w)=>w.end>start);if(!first)continue;
-    let last=null;for(let i=all.length-1;i>=0;i--){if(all[i].start<limit){last=all[i];break;}}if(!last||last.end<=first.start)continue;
-    const s=Math.max(startTime,first.start-0.08),e=Math.min(endTime,last.end+0.18);if(e-s<10||e-s>90)continue;
-    const segment=all.filter((w)=>w.start>=s&&w.end<=e),candidate=scoreWindow(segment,all,s,e,visuals,audioEvents,pauseEvents);if(!candidate)continue;
-    const key=Math.round(s/2)+":"+Math.round(e/2),old=map.get(key);if(!old||candidate.score>old.score)map.set(key,candidate);
-  }}
+  let startIndex=0;
+  for(let start=startTime;start<=endTime-10;start+=step){
+    while(startIndex<all.length&&all[startIndex].end<=start)startIndex++;
+    if(startIndex>=all.length)break;
+    const first=all[startIndex];
+    for(const length of lengths){
+      const limit=Math.min(endTime,start+length);
+      let endIndex=startIndex;
+      while(endIndex<all.length&&all[endIndex].start<limit)endIndex++;
+      if(endIndex<=startIndex)continue;
+      const last=all[endIndex-1];
+      if(last.end<=first.start)continue;
+      const s=Math.max(startTime,first.start-0.08),e=Math.min(endTime,last.end+0.18);
+      if(e-s<10||e-s>90)continue;
+      const segment=all.slice(startIndex,endIndex).filter((w)=>w.start>=s&&w.end<=e);
+      const candidate=scoreWindow(segment,all,s,e,visuals,audioEvents,pauseEvents);
+      if(!candidate)continue;
+      const key=Math.round(s/2)+":"+Math.round(e/2),old=map.get(key);
+      if(!old||candidate.score>old.score)map.set(key,candidate);
+    }
+  }
   const ranked=Array.from(map.values()).sort((a,b)=>b.score-a.score),selected=[];
   for(const c of ranked){const overlap=selected.some((x)=>{const inter=Math.max(0,Math.min(c.endTime,x.endTime)-Math.max(c.startTime,x.startTime));return inter/Math.max(0.01,Math.min(c.endTime-c.startTime,x.endTime-x.startTime))>0.58;});if(!overlap)selected.push(c);if(selected.length>=count)break;}
   if(!selected.length){const len=Math.min(30,endTime-startTime);for(let i=0;i<count;i++){const s=startTime+i*Math.max(0,endTime-startTime-len)/Math.max(1,count-1),first=all.find((w)=>w.end>s);let last=null;for(let j=all.length-1;j>=0;j--){if(all[j].start<s+len){last=all[j];break;}}if(first&&last&&last.end-first.start>=10){const segment=all.filter((w)=>w.start>=first.start&&w.end<=last.end),text=textOf(segment);selected.push({title:text.slice(0,72),hookReason:"Distinct speech segment; no strong semantic cues were detected.",startTime:first.start,endTime:last.end,score:0,signals:{}});}}}
