@@ -7,3 +7,5 @@ storage/
 !.env.example
 .vercel
 .env*
+
+desktop/dist/
