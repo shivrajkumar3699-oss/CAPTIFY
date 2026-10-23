@@ -1223,7 +1223,7 @@ export default function Home() {
           }
         );
         if (!createResponse.ok) {
-          const data = await createResponse.json().catch(() => ({}));
+          const data = await createResponse.json().catch((): DesktopJsonPayload => ({}));
           throw new Error(data.error || "Could not create the processing job.");
         }
         createData = await createResponse.json();
@@ -1643,7 +1643,7 @@ await new Promise<void>(
         const data =
           await analyzeResponse
             .json()
-            .catch(() => ({}));
+            .catch((): DesktopJsonPayload => ({}));
 
         throw new Error(
           data.error ||
@@ -1862,7 +1862,7 @@ await new Promise<void>(
         const data =
           await renderResponse
             .json()
-            .catch(() => ({}));
+            .catch((): DesktopJsonPayload => ({}));
 
         throw new Error(
           data.error ||
@@ -1958,7 +1958,7 @@ await new Promise<void>(
           if (!retryResponse.ok) {
             const data = await retryResponse
               .json()
-              .catch(() => ({}));
+              .catch((): DesktopJsonPayload => ({}));
             throw new Error(
               data.error ||
                 "Automatic render recovery failed."
