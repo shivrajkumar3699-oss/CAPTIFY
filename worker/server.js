@@ -15,6 +15,10 @@ const {
 } = require("./lib/detectHooks");
 
 const {
+  detectAudioEvents,
+} = require("./lib/hookSignals");
+
+const {
   VIDEO_WIDTH,
   VIDEO_HEIGHT,
   buildEditedClip,
@@ -1196,11 +1200,13 @@ async function runSmartAnalysis(
         "Transcribing extracted audio",
     });
 
-    const transcription =
-      await transcribeWithTimestamps(
-        analysisPath,
-        audioLanguage
-      );
+    // Analyze the compressed MP3 for silence boundaries while the transcription
+    // request is in flight. This avoids another upload or any original-video
+    // decoding on the worker.
+    const [transcription, audioEvents] = await Promise.all([
+      transcribeWithTimestamps(analysisPath, audioLanguage),
+      detectAudioEvents(analysisPath),
+    ]);
 
     const text =
       transcription?.text;
@@ -1283,7 +1289,13 @@ async function runSmartAnalysis(
         text,
         clipCount,
         videoDuration,
-        words
+        words,
+        {
+          visualEvents: Array.isArray(options.visualEvents)
+            ? options.visualEvents.slice(0, 24)
+            : [],
+          audioEvents,
+        }
       );
 
     if (
