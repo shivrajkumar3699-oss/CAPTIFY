@@ -168,6 +168,9 @@ async function getWorkerStatus(jobId) {
   const text = await response.text();
   let data;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text.slice(0, 1000) }; }
+  if (response.status === 404) {
+    return { ok: true, status: 200, data: { jobId: id, status: "queued", progress: 0, message: "Waiting for the local worker..." } };
+  }
   return { ok: response.ok, status: response.status, data: normalizeStatus(data, id) };
 }
 async function uploadChunk(payload) {
