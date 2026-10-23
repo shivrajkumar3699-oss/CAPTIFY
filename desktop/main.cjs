@@ -84,7 +84,7 @@ async function startWorker() {
   workerPort = await reservePort();
   workerSecret = crypto.randomBytes(32).toString("hex");
   workerUrl = "http://127.0.0.1:" + workerPort;
-  workerProcess = utilityProcess.fork(workerEntry, [], {
+  const child = utilityProcess.fork(workerEntry, [], {
     cwd: path.dirname(workerEntry),
     serviceName: "CAPTIFY Local FFmpeg Worker",
     env: {
@@ -103,9 +103,15 @@ async function startWorker() {
       FFMPEG_THREADS: "2"
     }
   });
-  workerProcess.on("exit", (code) => {
+  workerProcess = child;
+  child.on("exit", (code) => {
     console.warn("[desktop] Local worker exited with code", code);
-    workerProcess = null;
+    if (workerProcess === child) {
+      workerProcess = null;
+      workerUrl = "";
+      workerPort = 0;
+      workerSecret = "";
+    }
   });
   try { await waitForWorker(); } catch (error) { await stopWorker(); throw error; }
 }
@@ -116,7 +122,18 @@ async function stopWorker() {
   workerPort = 0;
   workerSecret = "";
   if (!child) return;
-  try { child.kill(); } catch {}
+  await new Promise((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    child.once("exit", finish);
+    const timeout = setTimeout(finish, 2500);
+    try { child.kill(); } catch { finish(); }
+  });
 }
 function workerHeaders(extra = {}) {
   return { "x-worker-secret": workerSecret, ...extra };
