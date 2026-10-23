@@ -14,6 +14,7 @@ const APP_URL = process.env.CAPTIFY_DESKTOP_URL || (app.isPackaged
   : "https://captifyy.vercel.app");
 const USER_DATA_DIR = app.getPath("userData");
 const SETTINGS_PATH = path.join(USER_DATA_DIR, "settings.bin");
+const STORAGE_DIR = path.join(app.getPath("videos"), "CAPTIFY");
 let mainWindow = null;
 let settingsWindow = null;
 let workerProcess = null;
@@ -80,7 +81,7 @@ async function startWorker() {
   if (!settings.GROQ_API_KEY) throw new Error("A Groq API key is required for speech transcription. Open Settings to add it.");
   const workerEntry = getWorkerEntry();
   if (!fs.existsSync(workerEntry)) throw new Error("Local worker files are missing: " + workerEntry + ". Rebuild the Windows installer.");
-  await fs.promises.mkdir(path.join(USER_DATA_DIR, "storage"), { recursive: true });
+  await fs.promises.mkdir(STORAGE_DIR, { recursive: true });
   workerPort = await reservePort();
   workerSecret = crypto.randomBytes(32).toString("hex");
   workerUrl = "http://127.0.0.1:" + workerPort;
@@ -92,7 +93,7 @@ async function startWorker() {
       NODE_ENV: "production",
       PORT: String(workerPort),
       HOST: "127.0.0.1",
-      STORAGE_DIR: path.join(USER_DATA_DIR, "storage"),
+      STORAGE_DIR,
       WORKER_SECRET: workerSecret,
       NEXT_APP_URL: "",
       CAPTIFY_DESKTOP: "1",
@@ -319,7 +320,7 @@ app.whenReady().then(async () => {
     } catch (error) { return new Response(error.message || "Local download failed", { status: 500 }); }
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: "CAPTIFY", submenu: [{ label: "Settings", click: () => createSettingsWindow() }, { type: "separator" }, { role: "quit" }] },
+    { label: "CAPTIFY", submenu: [{ label: "Settings", click: () => createSettingsWindow() }, { label: "Open Output Folder", click: () => { void shell.openPath(STORAGE_DIR); } }, { type: "separator" }, { role: "quit" }] },
     { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }
   ]));
   if (!readSettings().GROQ_API_KEY) { createSettingsWindow(); return; }
