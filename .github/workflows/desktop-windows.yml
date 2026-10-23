@@ -30,6 +30,12 @@ jobs:
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm install
+      - name: Check Electron entry-point syntax
+        working-directory: desktop
+        run: |
+          node --check main.cjs
+          node --check preload.cjs
+          node --check settings.js
       - name: Build Windows installer
         working-directory: desktop
         run: npm run dist:win
