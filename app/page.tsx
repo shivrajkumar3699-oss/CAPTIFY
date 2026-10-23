@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import {
+  analyzeVisualSignals,
   extractSpeechAudio,
   getMediaDuration,
   getVideoResolution,
@@ -1510,6 +1511,11 @@ export default function Home() {
       const duration =
         await getMediaDuration(file);
 
+      // Run a small, capped visual sample in parallel with audio extraction.
+      // Only timestamps/scores are kept; source frames never leave the browser.
+      const visualSignalsPromise =
+        analyzeVisualSignals(file, duration).catch(() => []);
+
       /*
        * STEP 2
        * Extract only small speech audio locally.
@@ -1601,6 +1607,7 @@ export default function Home() {
                   videoLanguage,
                 captionLanguage,
                 framing,
+                visualEvents: await visualSignalsPromise,
               },
             }),
           }
