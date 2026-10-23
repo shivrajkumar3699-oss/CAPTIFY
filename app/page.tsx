@@ -129,12 +129,13 @@ function formatMbps(bytesPerSecond: number) {
 }
 
 
-type DesktopJsonResponse = { ok: boolean; status?: number; json: () => Promise<any> };
+type DesktopJsonPayload = Partial<JobStatus> & { error?: string; instanceId?: string };
+type DesktopJsonResponse = { ok: boolean; status?: number; json: () => Promise<DesktopJsonPayload> };
 
 async function getJobStatusResponse(jobId: string): Promise<DesktopJsonResponse> {
   if (window.captifyDesktop?.isDesktop) {
     const result = await window.captifyDesktop.getJobStatus(jobId);
-    return { ok: result.ok, status: result.status, json: async () => result.data };
+    return { ok: result.ok, status: result.status, json: async () => result.data as DesktopJsonPayload };
   }
   return fetch("/api/status/" + encodeURIComponent(jobId), { cache: "no-store" });
 }
