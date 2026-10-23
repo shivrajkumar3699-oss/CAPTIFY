@@ -9,7 +9,9 @@ protocol.registerSchemesAsPrivileged([{
   privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true }
 }]);
 
-const APP_URL = process.env.CAPTIFY_DESKTOP_URL || "https://captifyy.vercel.app";
+const APP_URL = process.env.CAPTIFY_DESKTOP_URL || (app.isPackaged
+  ? "https://captify-git-feature-windows-desktop-electron-loc-069361-ritikai.vercel.app"
+  : "https://captifyy.vercel.app");
 const USER_DATA_DIR = app.getPath("userData");
 const SETTINGS_PATH = path.join(USER_DATA_DIR, "settings.bin");
 let mainWindow = null;
