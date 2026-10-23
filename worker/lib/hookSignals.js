@@ -46,7 +46,7 @@ function detectAudioEvents(audioPath) {
     const timeout = setTimeout(() => {
       try { child.kill("SIGKILL"); } catch {}
       finish([]);
-    }, 20000);
+    }, 8000);
     child.on("close", () => clearTimeout(timeout));
     child.on("error", () => clearTimeout(timeout));
   });
