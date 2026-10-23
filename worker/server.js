@@ -360,6 +360,12 @@ async function pushStatus(
     );
   }
 
+  // Desktop mode polls this local worker directly through Electron IPC.
+  // Avoid callback traffic to a cloud API for every local progress update.
+  if (process.env.CAPTIFY_DESKTOP === "1") {
+    return true;
+  }
+
   if (!statusBaseUrl) {
     console.error(
       `[${jobId}] NEXT_APP_URL is not configured`
@@ -2205,6 +2211,7 @@ app.get(
 
 app.listen(
   PORT,
+  process.env.CAPTIFY_DESKTOP === "1" ? "127.0.0.1" : "0.0.0.0",
   () => {
     console.log(
       `Captify worker listening on port ${PORT}`
