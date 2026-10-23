@@ -39,6 +39,9 @@ jobs:
       - name: Build Windows installer
         working-directory: desktop
         run: npm run dist:win
+      - name: Smoke-test the local worker
+        working-directory: desktop
+        run: node smoke-test.cjs
       - name: Upload installer for test builds
         if: success()
         uses: actions/upload-artifact@v4
