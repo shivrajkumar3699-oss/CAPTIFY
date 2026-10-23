@@ -146,7 +146,7 @@ export async function analyzeVisualSignals(file: File, duration: number) {
     canvas.height = 36;
     const context = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
     if (!context) return [];
-    const sampleCount = Math.min(18, Math.max(6, Math.floor(duration / 20) + 1));
+    const sampleCount = Math.min(24, Math.max(12, Math.floor(duration / 8) + 1));
     const events: Array<{ time: number; strength: number }> = [];
     let previous: number[] | null = null;
     for (let i = 0; i < sampleCount; i++) {
