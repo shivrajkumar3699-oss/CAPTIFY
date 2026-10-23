@@ -66,6 +66,19 @@ function createFallbackHooks(words,numClips,videoDuration,signalOptions) {
   }
   const ranked=Array.from(map.values()).sort((a,b)=>b.score-a.score),selected=[];
   for(const c of ranked){const overlap=selected.some((x)=>{const inter=Math.max(0,Math.min(c.endTime,x.endTime)-Math.max(c.startTime,x.startTime));return inter/Math.max(0.01,Math.min(c.endTime-c.startTime,x.endTime-x.startTime))>0.58;});if(!overlap)selected.push(c);if(selected.length>=count)break;}
+  if(selected.length<count){
+    for(const c of ranked){
+      if(selected.some((x)=>Math.abs(x.startTime-c.startTime)<8))continue;
+      const tooSimilar=selected.some((x)=>{
+        const inter=Math.max(0,Math.min(c.endTime,x.endTime)-Math.max(c.startTime,x.startTime));
+        const ratio=inter/Math.max(0.01,Math.min(c.endTime-c.startTime,x.endTime-x.startTime));
+        return ratio>0.82;
+      });
+      if(tooSimilar)continue;
+      selected.push(c);
+      if(selected.length>=count)break;
+    }
+  }
   if(!selected.length){const len=Math.min(30,endTime-startTime);for(let i=0;i<count;i++){const s=startTime+i*Math.max(0,endTime-startTime-len)/Math.max(1,count-1),first=all.find((w)=>w.end>s);let last=null;for(let j=all.length-1;j>=0;j--){if(all[j].start<s+len){last=all[j];break;}}if(first&&last&&last.end-first.start>=10){const segment=all.filter((w)=>w.start>=first.start&&w.end<=last.end),text=textOf(segment);selected.push({title:text.slice(0,72),hookReason:"Distinct speech segment; no strong semantic cues were detected.",startTime:first.start,endTime:last.end,score:0,signals:{}});}}}
   return selected.sort((a,b)=>a.startTime-b.startTime).map(({score,signals,...item})=>item);
 }
