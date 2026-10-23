@@ -18,6 +18,7 @@ let workerProcess = null;
 let workerPort = 0;
 let workerSecret = "";
 let workerUrl = "";
+let isSavingSettings = false;
 
 function isTrustedSender(event) {
   try {
@@ -198,7 +199,7 @@ function createSettingsWindow() {
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   settingsWindow.loadFile(path.join(__dirname, "settings.html"));
-  settingsWindow.on("closed", () => { settingsWindow = null; if (!mainWindow) app.quit(); });
+  settingsWindow.on("closed", () => { settingsWindow = null; if (!mainWindow && !isSavingSettings) app.quit(); });
 }
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -267,6 +268,7 @@ ipcMain.handle("desktop:save-settings", async (event, input) => {
   await fs.promises.mkdir(USER_DATA_DIR, { recursive: true });
   const encrypted = safeStorage.encryptString(JSON.stringify({ GROQ_API_KEY: groq, GEMINI_API_KEY: gemini1, GEMINI_API_KEY_2: gemini2 }));
   await fs.promises.writeFile(SETTINGS_PATH, encrypted, { mode: 0o600 });
+  isSavingSettings = true;
   try { if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close(); } catch {}
   try {
     await stopWorker();
@@ -277,6 +279,8 @@ ipcMain.handle("desktop:save-settings", async (event, input) => {
   } catch (error) {
     createSettingsWindow();
     throw new Error(error.message || "Could not start the local worker.");
+  } finally {
+    isSavingSettings = false;
   }
 });
 ipcMain.handle("desktop:open-settings", async (event) => {
