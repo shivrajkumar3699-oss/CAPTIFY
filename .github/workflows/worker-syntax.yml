@@ -27,3 +27,4 @@ jobs:
           node --check worker/lib/pipeline.js
           node --check worker/lib/detectHooks.js
           node --check worker/lib/hookSignals.js
+          node worker/scripts/test-hook-detection.js
