@@ -1,0 +1,41 @@
+{
+  "name": "captify-windows-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows desktop shell for CAPTIFY with local FFmpeg rendering",
+  "main": "main.cjs",
+  "scripts": {
+    "install:worker": "npm --prefix ../worker install --omit=dev",
+    "start": "electron .",
+    "dev": "npm run install:worker && electron .",
+    "dist:win": "npm run install:worker && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.captify.desktop",
+    "productName": "CAPTIFY",
+    "directories": { "output": "dist" },
+    "files": ["main.cjs", "preload.cjs", "settings.html", "settings.js", "package.json"],
+    "extraResources": [
+      {
+        "from": "../worker",
+        "to": "worker",
+        "filter": ["**/*", "!**/.env", "!**/.env.*", "!**/node_modules/.cache/**"]
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "artifactName": "CAPTIFY-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
