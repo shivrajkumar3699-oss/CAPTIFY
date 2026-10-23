@@ -1,6 +1,7 @@
 const FILLER = new Set(["um","uh","so","okay","ok","anyway","basically","well","like","right"]);
 const CURIOSITY = new Set(["why","how","what","secret","truth","mistake","wrong","never","impossible","danger","problem","failed","failure","shocking","crazy","worst","best","hidden","wait","unless","instead","because","but","however","suddenly","discovered","revealed","survive","lost","found","money","free","prove","imagine","nobody","everyone","finally","scared","angry","love","hate","win","lose","died","death","fight","caught","escape","kya","kyun","kaise","sach","galti","khatarnaak","achanak","nahi","sabse","dekho","socho","chalo","sun","लेकिन","क्यों","कैसे","सच","गलती","खतरा","अचानक","नहीं","सबसे"]);
 const EMOTION = new Set(["love","hate","fear","afraid","angry","happy","sad","shocked","surprised","scared","amazing","terrible","worst","best","evil","betrayed","win","lose","fight","death","destroyed","shocking","dar","khush","gussa","kamaal","maza","hairaan","डर","खुश","गुस्सा","कमाल","मज़ा","हैरान"]);
+const PAYOFF = new Set(["finally","realized","discovered","revealed","result","therefore","because","turns","out","ended","won","lost","escaped","survived","proved","means","hence","आखिर","फिर","तभी","इसलिए","पता","जीत","बच","निकला"]);
 function normalizeWords(words) {
   if (!Array.isArray(words)) return [];
   return words.map((w) => ({ text: String((w && (w.word || w.text)) || "").trim(), start: Number((w && (w.start !== undefined ? w.start : w.startTime)) || 0), end: Number((w && (w.end !== undefined ? w.end : w.endTime)) || 0) }))
@@ -19,6 +20,10 @@ function scoreWindow(segment, allWords, start, end, visuals, audioEvents, pauseE
   const text=textOf(segment), t=tokens(text); if(t.length<12)return null;
   const first=segment.filter((w)=>w.start<start+4), ft=tokens(textOf(first)), opening=textOf(first).toLowerCase();
   const curiosity=t.reduce((n,x)=>n+(CURIOSITY.has(x)?1:0),0), emotion=t.reduce((n,x)=>n+(EMOTION.has(x)?1:0),0);
+  const endingWords=segment.filter((w)=>w.end>=end-6);
+  const endingTokens=tokens(textOf(endingWords));
+  const payoff=endingTokens.reduce((n,x)=>n+(PAYOFF.has(x)?1:0),0);
+  const contextless=["he","she","it","they","this","that","these","those","because","and","then","उसने","उन्होंने","यह","वह"].includes(ft[0]||"");
   const questions=t.reduce((n,x)=>n+((["why","how","what","when","where","who","which","क्या","क्यों","कैसे"].includes(x))?1:0),0);
   const contrast=t.reduce((n,x)=>n+((["but","however","instead","although","unless","except","yet","लेकिन","मगर"].includes(x))?1:0),0);
   const density=t.length/Math.max(1,end-start), firstToken=ft[0]||"";
@@ -30,9 +35,9 @@ function scoreWindow(segment, allWords, start, end, visuals, audioEvents, pauseE
   const audioNearStart=(audioEvents||[]).reduce((best,e)=>{const distance=Math.abs(Number(e&&e.time)-start);return Number.isFinite(distance)&&distance<1.8?Math.max(best,clamp(Number(e.strength)||0.35,0,1)*(1-distance/1.8)):best;},0);
   const audioNearEnd=(audioEvents||[]).reduce((best,e)=>{const distance=Math.abs(Number(e&&e.time)-end);return Number.isFinite(distance)&&distance<1.8?Math.max(best,clamp(Number(e.strength)||0.35,0,1)*(1-distance/1.8)):best;},0);
   const questionOpening=opening.includes("?")||ft.some((x)=>["why","how","what","क्या","क्यों","कैसे"].includes(x));
-  let score=clamp(ft.length/7,0,1)+(questionOpening?1.05:0)+clamp(curiosity/Math.max(2,t.length*0.055),0,1)*1.35+clamp(emotion/3,0,1)*0.75+clamp(questions/3,0,1)*0.5+clamp(contrast/2,0,1)*0.8+(t.some((x)=>/[0-9]/.test(x))?0.25:0)+(/[.!?।]$/.test(text.trim())?0.35:0)+clamp((density-0.8)/2.2,0,1)*0.55+startPause*0.45+endPause*0.2+visual*0.75+audioNearStart*0.45+audioNearEnd*0.15;
-  if(FILLER.has(firstToken))score-=0.7;if(ft.length<3)score-=0.35;if(end-start<12)score-=0.35;if(end-start>65)score-=(end-start-65)/45;if(t.length<18)score-=0.3;
-  const reasons=[];if(questionOpening)reasons.push("curiosity-led opening");if(curiosity>=2)reasons.push("curiosity-building language");if(emotion>=2)reasons.push("emotional language");if(contrast>0)reasons.push("contrast or turning point");if(visual>=0.25)reasons.push("visual change near opening");if(audioNearStart>=0.3)reasons.push("audio pause near opening");if(startPause>=0.4)reasons.push("natural speech boundary");if(!reasons.length)reasons.push("transcript flow and speech boundaries");
+  let score=clamp(ft.length/7,0,1)+(questionOpening?1.05:0)+clamp(curiosity/Math.max(2,t.length*0.055),0,1)*1.35+clamp(emotion/3,0,1)*0.75+clamp(questions/3,0,1)*0.5+clamp(contrast/2,0,1)*0.8+(t.some((x)=>/[0-9]/.test(x))?0.25:0)+(/[.!?।]$/.test(text.trim())?0.35:0)+clamp((density-0.8)/2.2,0,1)*0.55+startPause*0.45+endPause*0.2+visual*0.75+audioNearStart*0.45+audioNearEnd*0.15+clamp(payoff/2,0,1)*0.55;
+  if(FILLER.has(firstToken))score-=0.7;if(contextless)score-=0.45;if(ft.length<3)score-=0.35;if(end-start<12)score-=0.35;if(end-start>65)score-=(end-start-65)/45;if(t.length<18)score-=0.3;
+  const reasons=[];if(questionOpening)reasons.push("curiosity-led opening");if(curiosity>=2)reasons.push("curiosity-building language");if(emotion>=2)reasons.push("emotional language");if(contrast>0)reasons.push("contrast or turning point");if(visual>=0.25)reasons.push("visual change near opening");if(payoff>0)reasons.push("includes an outcome or payoff");if(audioNearStart>=0.3)reasons.push("audio pause near opening");if(startPause>=0.4)reasons.push("natural speech boundary");if(!reasons.length)reasons.push("transcript flow and speech boundaries");
   return {title:text.length>72?text.slice(0,69).trim()+"...":text,hookReason:reasons.slice(0,3).join("; "),startTime:Number(start.toFixed(2)),endTime:Number(end.toFixed(2)),score,signals:{curiosity,emotion,questions,contrast,visual}};
 }
 function createFallbackHooks(words,numClips,videoDuration,signalOptions) {
