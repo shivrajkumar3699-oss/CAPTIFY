@@ -36,6 +36,7 @@ jobs:
           node --check main.cjs
           node --check preload.cjs
           node --check settings.js
+          node --check smoke-test.cjs
       - name: Build Windows installer
         working-directory: desktop
         run: npm run dist:win
