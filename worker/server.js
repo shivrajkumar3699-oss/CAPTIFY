@@ -129,7 +129,7 @@ const BUILD_COMMIT =
   "unknown";
 
 const PIPELINE_VERSION =
-  "2026-10-standard-caption-render-v1";
+  "2026-10-multisignal-hook-ranking-v1";
 
 const STATUS_DIR = path.join(
   STORAGE_DIR || "",
