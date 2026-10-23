@@ -101,6 +101,86 @@ export async function getMediaDuration(file: File) {
   }
 }
 
+/**
+ * Lightweight local visual sampling. Only tiny grayscale signatures are kept;
+ * no frames are uploaded. Sampling is capped so long videos do not trigger
+ * unbounded browser decoding work.
+ */
+export async function analyzeVisualSignals(file: File, duration: number) {
+  if (typeof document === "undefined" || !Number.isFinite(duration) || duration < 2) return [];
+  const sourceUrl = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = sourceUrl;
+  const cleanup = () => {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(sourceUrl);
+  };
+  const waitFor = (eventName: string, timeoutMs = 1500) =>
+    new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        video.removeEventListener(eventName, onEvent);
+        video.removeEventListener("error", onError);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onEvent = () => finish();
+      const onError = () => finish(new Error("Could not decode visual sample."));
+      const timer = setTimeout(() => finish(new Error("Visual sample timed out.")), timeoutMs);
+      video.addEventListener(eventName, onEvent, { once: true });
+      video.addEventListener("error", onError, { once: true });
+    });
+  try {
+    await waitFor("loadedmetadata", 5000);
+    if (!video.videoWidth || !video.videoHeight || !Number.isFinite(video.duration)) return [];
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 36;
+    const context = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    if (!context) return [];
+    const sampleCount = Math.min(18, Math.max(6, Math.floor(duration / 20) + 1));
+    const events: Array<{ time: number; strength: number }> = [];
+    let previous: number[] | null = null;
+    for (let i = 0; i < sampleCount; i++) {
+      const time = Math.min(Math.max(0.05, duration - 0.08), ((i + 0.5) / sampleCount) * duration);
+      try {
+        const seeked = waitFor("seeked", 1500);
+        video.currentTime = time;
+        await seeked;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        const signature: number[] = [];
+        for (let p = 0; p < pixels.length; p += 16) {
+          signature.push((pixels[p] * 0.299 + pixels[p + 1] * 0.587 + pixels[p + 2] * 0.114) / 255);
+        }
+        if (previous) {
+          let total = 0;
+          for (let p = 0; p < signature.length; p++) total += Math.abs(signature[p] - previous[p]);
+          const difference = total / Math.max(1, signature.length);
+          if (difference >= 0.22) events.push({ time: Number(time.toFixed(2)), strength: Math.min(1, difference * 2.2) });
+        }
+        previous = signature;
+      } catch {
+        // Visual analysis is best-effort; a browser codec/seek issue must not
+        // block transcription or hook selection.
+      }
+    }
+    return events.slice(0, 24);
+  } catch {
+    return [];
+  } finally {
+    cleanup();
+  }
+}
+
 export async function extractSpeechAudio(
   file: File,
   onProgress?: (progress: number) => void,
