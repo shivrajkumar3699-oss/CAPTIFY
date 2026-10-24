@@ -22,6 +22,14 @@ let workerPort = 0;
 let workerSecret = "";
 let workerUrl = "";
 let isSavingSettings = false;
+let workerLogTail = [];
+
+function recordWorkerOutput(stream, chunk) {
+  const lines = String(chunk || "").split("\n").map((line) => line.replace(/\r$/, "")).filter(Boolean);
+  for (const line of lines) workerLogTail.push("[" + stream + "] " + line.slice(0, 1200));
+  if (workerLogTail.length > 40) workerLogTail = workerLogTail.slice(-40);
+  for (const line of lines) console[stream === "stderr" ? "warn" : "log"]("[desktop-worker]", line);
+}
 
 function isTrustedSender(event) {
   try {
@@ -85,6 +93,7 @@ async function startWorker() {
   workerPort = await reservePort();
   workerSecret = crypto.randomBytes(32).toString("hex");
   workerUrl = "http://127.0.0.1:" + workerPort;
+  workerLogTail = [];
   const child = utilityProcess.fork(workerEntry, [], {
     cwd: path.dirname(workerEntry),
     serviceName: "CAPTIFY Local FFmpeg Worker",
@@ -105,8 +114,14 @@ async function startWorker() {
     }
   });
   workerProcess = child;
+  if (child.stdout) child.stdout.on("data", (chunk) => recordWorkerOutput("stdout", chunk));
+  if (child.stderr) child.stderr.on("data", (chunk) => recordWorkerOutput("stderr", chunk));
+  child.on("error", (error) => {
+    recordWorkerOutput("stderr", "Process error: " + (error && error.stack ? error.stack : String(error)));
+  });
   child.on("exit", (code) => {
     console.warn("[desktop] Local worker exited with code", code);
+    recordWorkerOutput("stderr", "Worker exited with code " + code);
     if (workerProcess === child) {
       workerProcess = null;
       workerUrl = "";
@@ -114,7 +129,11 @@ async function startWorker() {
       workerSecret = "";
     }
   });
-  try { await waitForWorker(); } catch (error) { await stopWorker(); throw error; }
+  try { await waitForWorker(); } catch (error) {
+    await stopWorker();
+    const details = workerLogTail.slice(-12).join("\n");
+    throw new Error((error.message || "Local worker startup failed.") + (details ? "\n\nWorker diagnostic output:\n" + details : "\n\nNo worker output was captured. Check that the installer contains worker dependencies and that Windows security software did not block the worker."));
+  }
 }
 async function stopWorker() {
   const child = workerProcess;
@@ -222,7 +241,11 @@ function createSettingsWindow() {
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   settingsWindow.loadFile(path.join(__dirname, "settings.html"));
-  settingsWindow.on("closed", () => { settingsWindow = null; if (!mainWindow && !isSavingSettings) app.quit(); });
+  const thisSettingsWindow = settingsWindow;
+  settingsWindow.on("closed", () => {
+    if (settingsWindow === thisSettingsWindow) settingsWindow = null;
+    if (!mainWindow && !settingsWindow && !isSavingSettings && !app.isQuitting) app.quit();
+  });
 }
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -297,17 +320,20 @@ ipcMain.handle("desktop:save-settings", async (event, input) => {
   const temporarySettingsPath = SETTINGS_PATH + ".tmp";
   await fs.promises.writeFile(temporarySettingsPath, encrypted, { mode: 0o600 });
   await fs.promises.rename(temporarySettingsPath, SETTINGS_PATH);
+
+  // Keep Settings open until the worker is healthy. Closing it before startup
+  // succeeded could race its "closed" handler and quit the whole app when a
+  // replacement Settings window was opened after a startup failure.
   isSavingSettings = true;
-  try { if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close(); } catch {}
   try {
     await stopWorker();
     await startWorker();
+    if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
     if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
     else mainWindow.reload();
     return { ok: true };
   } catch (error) {
-    createSettingsWindow();
-    throw new Error(error.message || "Could not start the local worker.");
+    return { ok: false, error: error.message || "Could not start the local worker." };
   } finally {
     isSavingSettings = false;
   }
@@ -335,4 +361,4 @@ app.whenReady().then(async () => {
 });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createSettingsWindow(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { void stopWorker(); });
+app.on("before-quit", () => { app.isQuitting = true; void stopWorker(); });
