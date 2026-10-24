@@ -21,11 +21,18 @@ form.addEventListener("submit", async (event) => {
   saveButton.disabled = true;
   message.textContent = "Saving settings securely and starting the local worker...";
   try {
-    await window.captifyDesktop.saveSettings({
+    const result = await window.captifyDesktop.saveSettings({
       groqApiKey: groqInput.value,
       geminiApiKey: geminiInput.value,
       geminiApiKey2: gemini2Input.value
     });
+    if (!result || result.ok !== true) {
+      message.textContent = result && result.error
+        ? result.error
+        : "Keys were saved, but the local worker did not start. Keep this window open and retry after checking the diagnostic message.";
+      saveButton.disabled = false;
+      return;
+    }
     message.textContent = "Settings saved. CAPTIFY is starting.";
   } catch (error) {
     message.textContent = error && error.message ? error.message : "Could not save settings.";
