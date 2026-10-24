@@ -27,12 +27,12 @@
   <h1>Set up your local worker.</h1>
   <p>CAPTIFY renders clips on this Windows PC. Add a Groq API key for speech transcription. Gemini keys are optional.</p>
   <form id="settings">
-    <label for="groq">Groq API key (required)</label>
-    <input id="groq" type="password" autocomplete="off" placeholder="gsk_..." required minlength="10">
+    <label for="groq">Groq API key (required for first setup)</label>
+    <input id="groq" type="password" autocomplete="off" placeholder="gsk_...">
     <div class="hint">Create or manage keys at console.groq.com/keys.</div>
-    <label for="gemini">Gemini API key (optional)</label>
+    <label for="gemini">Gemini API key (optional; blank keeps saved key)</label>
     <input id="gemini" type="password" autocomplete="off" placeholder="AIza...">
-    <label for="gemini2">Second Gemini API key (optional)</label>
+    <label for="gemini2">Second Gemini API key (optional; blank keeps saved key)</label>
     <input id="gemini2" type="password" autocomplete="off" placeholder="AIza...">
     <div class="privacy">Keys are encrypted using Windows credential encryption and stored on this PC. They are passed to the local worker and are not committed to GitHub. The original video stays on this PC; only extracted speech audio is sent to Groq for transcription. AI transcription needs internet access and may be subject to provider quotas and pricing.</div>
     <button id="save" type="submit">Save securely &amp; start CAPTIFY</button>
