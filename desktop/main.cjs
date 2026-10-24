@@ -283,14 +283,20 @@ ipcMain.handle("desktop:settings-status", async (event) => {
 });
 ipcMain.handle("desktop:save-settings", async (event, input) => {
   assertTrustedSender(event);
-  const groq = String(input && input.groqApiKey || "").trim();
-  const gemini1 = String(input && input.geminiApiKey || "").trim();
-  const gemini2 = String(input && input.geminiApiKey2 || "").trim();
+  const existing = readSettings();
+  const submittedGroq = String(input && input.groqApiKey || "").trim();
+  const submittedGemini1 = String(input && input.geminiApiKey || "").trim();
+  const submittedGemini2 = String(input && input.geminiApiKey2 || "").trim();
+  const groq = submittedGroq || existing.GROQ_API_KEY || "";
+  const gemini1 = submittedGemini1 || existing.GEMINI_API_KEY || "";
+  const gemini2 = submittedGemini2 || existing.GEMINI_API_KEY_2 || "";
   if (groq.length < 10) throw new Error("Enter a valid Groq API key to enable speech transcription.");
   if (!safeStorage.isEncryptionAvailable()) throw new Error("Windows credential encryption is unavailable on this device.");
   await fs.promises.mkdir(USER_DATA_DIR, { recursive: true });
   const encrypted = safeStorage.encryptString(JSON.stringify({ GROQ_API_KEY: groq, GEMINI_API_KEY: gemini1, GEMINI_API_KEY_2: gemini2 }));
-  await fs.promises.writeFile(SETTINGS_PATH, encrypted, { mode: 0o600 });
+  const temporarySettingsPath = SETTINGS_PATH + ".tmp";
+  await fs.promises.writeFile(temporarySettingsPath, encrypted, { mode: 0o600 });
+  await fs.promises.rename(temporarySettingsPath, SETTINGS_PATH);
   isSavingSettings = true;
   try { if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close(); } catch {}
   try {
