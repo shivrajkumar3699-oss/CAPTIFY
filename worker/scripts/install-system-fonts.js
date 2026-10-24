@@ -1,10 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-if (process.platform !== "linux") {
-  process.exit(0);
-}
-
 const FONT_DIR = path.join(__dirname, "..", "assets", "fonts");
 const FONT_FILES = [
   "NotoSansDevanagari-Regular.ttf",

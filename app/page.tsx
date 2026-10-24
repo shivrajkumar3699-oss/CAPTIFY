@@ -128,6 +128,38 @@ function formatMbps(bytesPerSecond: number) {
   return `${((bytesPerSecond * 8) / 1_000_000).toFixed(1)} Mbps`;
 }
 
+
+type DesktopJsonPayload = Partial<JobStatus> & { error?: string; instanceId?: string };
+type DesktopJsonResponse = { ok: boolean; status?: number; json: () => Promise<DesktopJsonPayload> };
+
+async function getJobStatusResponse(jobId: string): Promise<DesktopJsonResponse> {
+  if (window.captifyDesktop?.isDesktop) {
+    const result = await window.captifyDesktop.getJobStatus(jobId);
+    return { ok: result.ok, status: result.status, json: async () => result.data as DesktopJsonPayload };
+  }
+  return fetch("/api/status/" + encodeURIComponent(jobId), { cache: "no-store" });
+}
+
+async function postWorkerRequest(apiPath: string, workerPath: string, body: Record<string, unknown>): Promise<DesktopJsonResponse> {
+  if (window.captifyDesktop?.isDesktop) {
+    const result = await window.captifyDesktop.workerRequest(workerPath, body);
+    return { ok: result.ok, status: result.status, json: async () => result.data };
+  }
+  return fetch(apiPath, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function getWorkerHealth(workerBase: string): Promise<DesktopJsonResponse> {
+  if (window.captifyDesktop?.isDesktop) {
+    const result = await window.captifyDesktop.workerRequest("/health");
+    return { ok: result.ok, status: result.status, json: async () => result.data };
+  }
+  return fetch(workerBase + "/health", { cache: "no-store" });
+}
+
 function getStatusLabel(status: JobStatus["status"]) {
   switch (status) {
     case "queued":
@@ -772,6 +804,10 @@ export default function Home() {
 
   const cacheGeneratedClips = useCallback(
     (clips: ClipResult[]) => {
+      // Local clips are already available through the custom protocol. Do not
+      // copy every MP4 into renderer memory on desktop; play from local files.
+      if (window.captifyDesktop?.isDesktop) return Promise.resolve(clips);
+
       const task = clipCacheQueueRef.current.then(async () => {
         const cached: ClipResult[] = [];
 
@@ -834,7 +870,7 @@ export default function Home() {
             setStatus((current) => {
               if (
                 !current ||
-                !clip.editedUrl.includes(`/api/download/${current.jobId}/`)
+                !(window.captifyDesktop?.isDesktop ? clip.editedUrl.includes("/" + current.jobId + "/") : clip.editedUrl.includes("/api/download/" + current.jobId + "/"))
               ) {
                 return current;
               }
@@ -862,12 +898,7 @@ export default function Home() {
   const fetchStatus = useCallback(
     async (id: string) => {
       try {
-        const response = await fetch(
-          `/api/status/${encodeURIComponent(id)}`,
-          {
-            cache: "no-store",
-          }
-        );
+        const response = await getJobStatusResponse(id);
 
         if (!response.ok) {
           throw new Error("Unable to read job status.");
@@ -1178,32 +1209,25 @@ export default function Home() {
 
       setJobId(newJobId);
 
-      const createResponse = await fetch(
-        "/api/create-job",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            jobId: newJobId,
-          }),
-        }
-      );
+      let createData: { jobId: string; uploadUrlBase?: string };
 
-      if (!createResponse.ok) {
-        const data = await createResponse
-          .json()
-          .catch(() => ({}));
-
-        throw new Error(
-          data.error ||
-            "Could not create the processing job."
+      if (window.captifyDesktop?.isDesktop) {
+        createData = { jobId: newJobId, uploadUrlBase: "captify-local://worker" };
+      } else {
+        const createResponse = await fetch(
+          "/api/create-job",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: newJobId }),
+          }
         );
+        if (!createResponse.ok) {
+          const data = await createResponse.json().catch((): DesktopJsonPayload => ({}));
+          throw new Error(data.error || "Could not create the processing job.");
+        }
+        createData = await createResponse.json();
       }
-
-      const createData =
-        await createResponse.json();
 
       const confirmedJobId =
         String(createData.jobId || "");
@@ -1220,12 +1244,11 @@ export default function Home() {
           : "";
 
       const workerBase =
-        process.env.NODE_ENV === "production"
-          ? "https://captify-worker.onrender.com"
-          : uploadUrlBase.replace(
-              /\/upload\/[^/]+\/?$/,
-              ""
-            );
+        window.captifyDesktop?.isDesktop
+          ? "captify-local://worker"
+          : process.env.NODE_ENV === "production"
+            ? "https://captify-worker.onrender.com"
+            : uploadUrlBase.replace(/\/upload\/[^/]+\/?$/, "");
 
       if (!workerBase) {
         throw new Error(
@@ -1289,7 +1312,20 @@ export default function Home() {
 
             while (true) {
               try {
-                await new Promise<void>(
+                if (window.captifyDesktop?.isDesktop) {
+                  const result = await window.captifyDesktop.uploadChunk({
+                    pathname: new URL(targetUrl).pathname,
+                    contentRange: "bytes " + start + "-" + (end - 1) + "/" + totalBytes,
+                    contentType: uploadFile.type || "application/octet-stream",
+                    bytes: await chunk.arrayBuffer(),
+                  });
+                  if (!result.ok) {
+                    const responseBody = JSON.stringify(result.data || {});
+                    if (result.status === 409 && responseBody.includes("UPLOAD_RESTART_REQUIRED")) throw new Error("UPLOAD_RESTART_REQUIRED");
+                    throw new Error("Upload failed (HTTP " + result.status + ")" + (responseBody ? ": " + responseBody.slice(0, 500) : "."));
+                  }
+                } else {
+await new Promise<void>(
                   (resolve, reject) => {
                     const xhr =
                       new XMLHttpRequest();
@@ -1422,6 +1458,7 @@ export default function Home() {
                     xhr.send(chunk);
                   }
                 );
+                }
 
                 break;
               } catch (error) {
@@ -1587,37 +1624,26 @@ export default function Home() {
        * STEP 4
        * Transcribe + detect complete hooks.
        */
-      const analyzeResponse =
-        await fetch(
-          "/api/analyze",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              jobId: newJobId,
-              videoDuration: duration,
-              options: {
-                bgm,
-                captionColor,
-                numClips,
-                audioLanguage:
-                  videoLanguage,
-                captionLanguage,
-                framing,
-                visualEvents: await visualSignalsPromise,
-              },
-            }),
-          }
-        );
+      const analyzeResponse = await postWorkerRequest(
+        "/api/analyze",
+        "/analyze",
+        {
+          jobId: newJobId,
+          videoDuration: duration,
+          options: {
+            bgm, captionColor, numClips,
+            audioLanguage: videoLanguage,
+            captionLanguage, framing,
+            visualEvents: await visualSignalsPromise,
+          },
+        }
+      );
 
       if (!analyzeResponse.ok) {
         const data =
           await analyzeResponse
             .json()
-            .catch(() => ({}));
+            .catch((): DesktopJsonPayload => ({}));
 
         throw new Error(
           data.error ||
@@ -1641,15 +1667,7 @@ export default function Home() {
         | null = null;
 
       for (;;) {
-        const response =
-          await fetch(
-            `/api/status/${encodeURIComponent(
-              newJobId
-            )}`,
-            {
-              cache: "no-store",
-            }
-          );
+        const response = await getJobStatusResponse(newJobId);
 
         if (!response.ok) {
           throw new Error(
@@ -1817,10 +1835,7 @@ export default function Home() {
       let workerInstanceId = "";
 
       try {
-        const healthResponse = await fetch(
-          workerBase + "/health",
-          { cache: "no-store" }
-        );
+        const healthResponse = await getWorkerHealth(workerBase);
         if (healthResponse.ok) {
           const healthData = await healthResponse.json();
           workerInstanceId = String(healthData.instanceId || "");
@@ -1829,37 +1844,25 @@ export default function Home() {
         console.warn("Worker health check before render failed:", healthError);
       }
 
-      const renderResponse =
-        await fetch(
-          "/api/render-selected",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              jobId: newJobId,
-              selectedSegments:
-                uploadedSegments,
-              options: {
-                bgm,
-                captionColor,
-                numClips,
-                audioLanguage:
-                  videoLanguage,
-                captionLanguage,
-                framing,
-              },
-            }),
-          }
-        );
+      const renderResponse = await postWorkerRequest(
+        "/api/render-selected",
+        "/render-selected",
+        {
+          jobId: newJobId,
+          selectedSegments: uploadedSegments,
+          options: {
+            bgm, captionColor, numClips,
+            audioLanguage: videoLanguage,
+            captionLanguage, framing,
+          },
+        }
+      );
 
       if (!renderResponse.ok) {
         const data =
           await renderResponse
             .json()
-            .catch(() => ({}));
+            .catch((): DesktopJsonPayload => ({}));
 
         throw new Error(
           data.error ||
@@ -1893,10 +1896,7 @@ export default function Home() {
         }
 
         try {
-          const healthResponse = await fetch(
-            workerBase + "/health",
-            { cache: "no-store" }
-          );
+          const healthResponse = await getWorkerHealth(workerBase);
 
           if (!healthResponse.ok) return;
 
@@ -1941,32 +1941,24 @@ export default function Home() {
             );
           }
 
-          const retryResponse = await fetch(
+          const retryResponse = await postWorkerRequest(
             "/api/render-selected",
+            "/render-selected",
             {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
+              jobId: newJobId,
+              selectedSegments: uploadedSegments,
+              options: {
+                bgm, captionColor, numClips,
+                audioLanguage: videoLanguage,
+                captionLanguage, framing,
               },
-              body: JSON.stringify({
-                jobId: newJobId,
-                selectedSegments: uploadedSegments,
-                options: {
-                  bgm,
-                  captionColor,
-                  numClips,
-                  audioLanguage: videoLanguage,
-                  captionLanguage,
-                  framing,
-                },
-              }),
             }
           );
 
           if (!retryResponse.ok) {
             const data = await retryResponse
               .json()
-              .catch(() => ({}));
+              .catch((): DesktopJsonPayload => ({}));
             throw new Error(
               data.error ||
                 "Automatic render recovery failed."

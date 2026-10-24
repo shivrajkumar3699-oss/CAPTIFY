@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>CAPTIFY Settings</title>
+  <style>
+    :root { color-scheme: dark; font-family: Segoe UI, Arial, sans-serif; background: #030303; color: #f7f7f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 28px; }
+    .mark { display: inline-flex; width: 42px; height: 42px; align-items: center; justify-content: center; border-radius: 13px; background: #f7d002; color: #000; font-weight: 900; font-size: 22px; }
+    h1 { margin: 20px 0 8px; font-size: 28px; letter-spacing: -1px; }
+    p { color: #aaa; line-height: 1.6; font-size: 13px; }
+    label { display: block; margin: 20px 0 7px; font-size: 12px; font-weight: 700; }
+    input { display: block; width: 100%; padding: 12px; border: 1px solid #333; border-radius: 10px; background: #111; color: white; outline: none; }
+    input:focus { border-color: #f7d002; }
+    .hint { margin-top: 5px; font-size: 11px; color: #777; }
+    button { margin-top: 24px; width: 100%; padding: 13px; border: 0; border-radius: 999px; background: #f7d002; color: #000; font-weight: 900; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: wait; }
+    #message { min-height: 22px; color: #f7d002; font-size: 12px; }
+    .privacy { border: 1px solid #262626; background: #0c0c0c; border-radius: 12px; padding: 12px; margin-top: 18px; font-size: 11px; line-height: 1.6; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="mark">C</div>
+  <h1>Set up your local worker.</h1>
+  <p>CAPTIFY renders clips on this Windows PC. Add a Groq API key for speech transcription. Gemini keys are optional.</p>
+  <form id="settings">
+    <label for="groq">Groq API key (required for first setup)</label>
+    <input id="groq" type="password" autocomplete="off" placeholder="gsk_...">
+    <div class="hint">Create or manage keys at console.groq.com/keys.</div>
+    <label for="gemini">Gemini API key (optional; blank keeps saved key)</label>
+    <input id="gemini" type="password" autocomplete="off" placeholder="AIza...">
+    <label for="gemini2">Second Gemini API key (optional; blank keeps saved key)</label>
+    <input id="gemini2" type="password" autocomplete="off" placeholder="AIza...">
+    <div class="privacy">Keys are encrypted using Windows credential encryption and stored on this PC. They are passed to the local worker and are not committed to GitHub. The original video stays on this PC; only extracted speech audio is sent to Groq for transcription. AI transcription needs internet access and may be subject to provider quotas and pricing.</div>
+    <button id="save" type="submit">Save securely &amp; start CAPTIFY</button>
+    <p id="message" role="status"></p>
+  </form>
+  <script src="./settings.js"></script>
+</body>
+</html>

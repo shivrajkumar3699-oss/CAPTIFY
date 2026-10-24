@@ -1,0 +1,53 @@
+name: Windows desktop build
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "worker/**"
+      - "app/page.tsx"
+      - "types/captify-desktop.d.ts"
+      - ".github/workflows/desktop-windows.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "desktop/**"
+      - "worker/**"
+      - "app/page.tsx"
+      - "types/captify-desktop.d.ts"
+      - ".github/workflows/desktop-windows.yml"
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm install
+      - name: Check Electron entry-point syntax
+        working-directory: desktop
+        run: |
+          node --check main.cjs
+          node --check preload.cjs
+          node --check settings.js
+          node --check smoke-test.cjs
+      - name: Build Windows installer
+        working-directory: desktop
+        run: npm run dist:win
+      - name: Smoke-test the local worker
+        working-directory: desktop
+        run: node smoke-test.cjs
+      - name: Upload installer for test builds
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: captify-windows-installer
+          path: desktop/dist/*.exe
+          if-no-files-found: error
+          retention-days: 7
