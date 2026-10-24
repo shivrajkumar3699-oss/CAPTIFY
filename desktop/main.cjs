@@ -25,7 +25,7 @@ let isSavingSettings = false;
 let workerLogTail = [];
 
 function recordWorkerOutput(stream, chunk) {
-  const lines = String(chunk || "").split(/\\r?\\n/).filter(Boolean);
+  const lines = String(chunk || "").split("\n").map((line) => line.replace(/\r$/, "")).filter(Boolean);
   for (const line of lines) {
     workerLogTail.push("[" + stream + "] " + line.slice(0, 1200));
   }
@@ -133,8 +133,8 @@ async function startWorker() {
   });
   try { await waitForWorker(); } catch (error) {
     await stopWorker();
-    const details = workerLogTail.slice(-12).join("\\n");
-    throw new Error((error.message || "Local worker startup failed.") + (details ? "\\n\\nWorker diagnostic output:\\n" + details : "\\n\\nNo worker output was captured. Check that the installer contains worker dependencies and that Windows security software did not block the worker."));
+    const details = workerLogTail.slice(-12).join("\n");
+    throw new Error((error.message || "Local worker startup failed.") + (details ? "\n\nWorker diagnostic output:\n" + details : "\\n\\nNo worker output was captured. Check that the installer contains worker dependencies and that Windows security software did not block the worker."));
   }
 }
 async function stopWorker() {
