@@ -89,6 +89,35 @@ async function startWorker() {
   if (!settings.GROQ_API_KEY) throw new Error("A Groq API key is required for speech transcription. Open Settings to add it.");
   const workerEntry = getWorkerEntry();
   if (!fs.existsSync(workerEntry)) throw new Error("Local worker files are missing: " + workerEntry + ". Rebuild the Windows installer.");
+
+  // Check packaged runtime dependencies in the worker's own directory before
+  // launching the child. A missing dependency otherwise looks like an opaque
+  // exit-code-1 crash on some Windows/Electron builds.
+  const requiredWorkerModules = [
+    "dotenv",
+    "express",
+    "cors",
+    "ffmpeg-static",
+    "fluent-ffmpeg",
+    "groq-sdk",
+    "@google/genai"
+  ];
+  const missingWorkerModules = [];
+  for (const moduleName of requiredWorkerModules) {
+    try {
+      require.resolve(moduleName, { paths: [path.dirname(workerEntry)] });
+    } catch {
+      missingWorkerModules.push(moduleName);
+    }
+  }
+  if (missingWorkerModules.length) {
+    throw new Error(
+      "The installed CAPTIFY worker is missing dependencies: " +
+      missingWorkerModules.join(", ") +
+      ". The installer must include worker/node_modules. Rebuild the Windows installer."
+    );
+  }
+
   await fs.promises.mkdir(STORAGE_DIR, { recursive: true });
   workerPort = await reservePort();
   workerSecret = crypto.randomBytes(32).toString("hex");
@@ -97,6 +126,9 @@ async function startWorker() {
   const child = utilityProcess.fork(workerEntry, [], {
     cwd: path.dirname(workerEntry),
     serviceName: "CAPTIFY Local FFmpeg Worker",
+    // Explicitly pipe child output so early Node startup failures are visible
+    // in the diagnostic shown to the user.
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
     env: {
       ...process.env,
       NODE_ENV: "production",
